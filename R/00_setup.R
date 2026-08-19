@@ -1,10 +1,3 @@
-# ==========================================
-# Uber Data Analysis Project
-# File: 00_setup.R
-# Author: TV1
-# Purpose: Setup R environment and packages
-# ==========================================
-
 # Required packages
 packages <- c(
   "ggplot2",
