@@ -7,10 +7,10 @@
 
 # 1. LOAD LIBRARIES & CLEAN DATA
 source("R/00_setup.R")
-uber_data <- read.csv("output/results/uber_clean.csv")
+uber_data <- read.csv("Output/results/uber_clean.csv", check.names = FALSE)
 
 # Create output folder if it does not exist
-dir.create("output/results", recursive = TRUE, showWarnings = FALSE)
+dir.create("Output/results", recursive = TRUE, showWarnings = FALSE)
 
 
 # ==========================================
@@ -98,7 +98,7 @@ if ("Month" %in% names(base_data)) {
 
   write.csv(
     trips_by_base_month,
-    "output/results/trips_by_base_month.csv",
+    "Output/results/trips_by_base_month.csv",
     row.names = FALSE
   )
 }
@@ -129,7 +129,7 @@ if ("Weekday" %in% names(base_data)) {
 
   write.csv(
     trips_by_base_weekday,
-    "output/results/trips_by_base_weekday.csv",
+    "Output/results/trips_by_base_weekday.csv",
     row.names = FALSE
   )
 }
@@ -141,19 +141,19 @@ if ("Weekday" %in% names(base_data)) {
 
 write.csv(
   trips_by_base,
-  "output/results/trips_by_base.csv",
+  "Output/results/trips_by_base.csv",
   row.names = FALSE
 )
 
 write.csv(
   most_active_base,
-  "output/results/most_active_base.csv",
+  "Output/results/most_active_base.csv",
   row.names = FALSE
 )
 
 write.csv(
   least_active_base,
-  "output/results/least_active_base.csv",
+  "Output/results/least_active_base.csv",
   row.names = FALSE
 )
 

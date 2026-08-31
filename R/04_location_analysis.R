@@ -8,10 +8,10 @@
 
 # 1. LOAD LIBRARIES & CLEAN DATA
 source("R/00_setup.R")
-uber_data <- read.csv("output/results/uber_clean.csv")
+uber_data <- read.csv("Output/results/uber_clean.csv", check.names = FALSE)
 
 # Create output folder if it does not exist
-dir.create("output/results", recursive = TRUE, showWarnings = FALSE)
+dir.create("Output/results", recursive = TRUE, showWarnings = FALSE)
 
 
 # ==========================================
@@ -320,7 +320,7 @@ if ("Base" %in% names(nyc_location_data)) {
 
   write.csv(
     location_by_base,
-    "output/results/location_by_base.csv",
+    "Output/results/location_by_base.csv",
     row.names = FALSE
   )
 }
@@ -360,31 +360,31 @@ cat(
 
 write.csv(
   coordinate_quality,
-  "output/results/coordinate_quality.csv",
+  "Output/results/coordinate_quality.csv",
   row.names = FALSE
 )
 
 write.csv(
   location_summary,
-  "output/results/location_summary.csv",
+  "Output/results/location_summary.csv",
   row.names = FALSE
 )
 
 write.csv(
   location_grid,
-  "output/results/location_grid_counts.csv",
+  "Output/results/location_grid_counts.csv",
   row.names = FALSE
 )
 
 write.csv(
   top20_hotspots,
-  "output/results/top20_location_hotspots.csv",
+  "Output/results/top20_location_hotspots.csv",
   row.names = FALSE
 )
 
 write.csv(
   location_sample,
-  "output/results/location_sample.csv",
+  "Output/results/location_sample.csv",
   row.names = FALSE
 )
 
