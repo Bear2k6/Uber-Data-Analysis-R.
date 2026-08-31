@@ -57,15 +57,16 @@ uber_data$Date.Time <- as.POSIXct(
   format = "%m/%d/%Y %H:%M:%S"
 )
 
+# Lấy giờ
 uber_data$Hour <- as.integer(
   format(uber_data$Date.Time, "%H")
 )
 
+# Lấy thứ
 uber_data$Weekday <- weekdays(
   uber_data$Date.Time
 )
 
-# Đổi sang tên tiếng Anh ngắn
 weekday_map <- c(
   "Monday" = "Mon",
   "Tuesday" = "Tue",
@@ -93,6 +94,15 @@ uber_data$Weekday <- factor(
   )
 )
 
+# ============================================================
+# LẤY THÁNG TRỰC TIẾP TỪ Date.Time
+# ============================================================
+
+uber_data$Month <- format(
+  uber_data$Date.Time,
+  "%b"
+)
+
 uber_data$Month <- factor(
   uber_data$Month,
   levels = c(
@@ -104,7 +114,6 @@ uber_data$Month <- factor(
     "Sep"
   )
 )
-
 # ============================================================
 # 3. TẠO THƯ MỤC LƯU HÌNH
 # ============================================================
