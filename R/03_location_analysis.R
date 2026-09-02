@@ -1,6 +1,6 @@
 # ==========================================
 # Uber Data Analysis Project
-# File: 04_location_analysis.R
+# File: 03_location_analysis.R
 # Author: TV3
 # Purpose: Analyze geographic distribution
 #          of Uber pickup locations
