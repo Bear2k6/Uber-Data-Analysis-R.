@@ -1,6 +1,6 @@
 # ============================================================
 # Uber Data Analysis Project
-# File: 05_insight_dashboard.R
+# File: 06_insight_dashboard.R
 # Author: TV5
 # Purpose: Tổng hợp kết quả, rút ra insight, kết luận và dashboard
 # ============================================================
