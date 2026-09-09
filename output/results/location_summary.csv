@@ -1,0 +1,11 @@
+Metric,Value
+Total Records,4534327
+Valid Coordinates,4534327
+Records inside NYC bbox,4462626
+Percentage inside NYC (%),98.42
+Latitude Range Min,40.5774
+Latitude Range Max,40.9176
+Longitude Range Min,-74.15
+Longitude Range Max,-73.7004
+Median Latitude,40.7425
+Median Longitude,-73.9833

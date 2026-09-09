@@ -1,341 +1,265 @@
-# ============================================================
-# 04_visualization.R
-# UBER DATA ANALYSIS - VISUALIZATION & HEATMAP
-# ============================================================
+# ==========================================
+# Uber Data Analysis Project
+# File: 04_visualization.R
+# Purpose: Create all analysis charts from pre-computed results
+# ==========================================
 
-# Cài thư viện nếu chưa có
-if (!require(ggplot2)) install.packages("ggplot2")
-if (!require(dplyr)) install.packages("dplyr")
-if (!require(scales)) install.packages("scales")
+source("R/00_setup.R")
 
-library(ggplot2)
-library(dplyr)
-library(scales)
+# ==========================================
+# 0. HELPER: LOAD RESULT CSV
+# ==========================================
 
-# ============================================================
-# 1. ĐỌC 6 FILE DỮ LIỆU UBER
-# ============================================================
+load_result <- function(filename) {
+  path <- file.path("Output/results", filename)
+  if (!file.exists(path)) {
+    stop(paste("Required result file not found:", path,
+               "\nRun the analysis scripts first."))
+  }
+  readr::read_csv(path, show_col_types = FALSE)
+}
 
-files <- list.files(
-  "Data",
-  pattern = "uber-raw-data-.*\\.csv$",
-  full.names = TRUE
+# Uber brand color palette
+uber_colors <- c(
+  "#000000", "#276EF1", "#09B374", "#FF6937",
+  "#FFCD00", "#8C1932", "#9B51E0"
 )
 
-cat("So file du lieu:", length(files), "\n")
-
-uber_data <- bind_rows(
-  lapply(files, function(file) {
-    
-    data <- read.csv(
-      file,
-      stringsAsFactors = FALSE
+# Common theme
+theme_uber <- function() {
+  theme_minimal(base_size = 13) +
+    theme(
+      plot.title    = element_text(face = "bold", size = 15),
+      plot.subtitle = element_text(color = "grey50", size = 11),
+      axis.title    = element_text(face = "bold"),
+      plot.margin   = margin(15, 15, 15, 15)
     )
-    
-    data$Month <- substr(
-      basename(file),
-      16,
-      18
-    )
-    
-    return(data)
-  })
-)
+}
 
-cat(
-  "Tong so chuyen:",
-  format(nrow(uber_data), big.mark = ","),
-  "\n"
-)
+save_plot <- function(plot, filename, width = 10, height = 6) {
+  path <- file.path("Output/figures", filename)
+  ggsave(path, plot, width = width, height = height, dpi = 150)
+  cat("Saved:", path, "\n")
+}
 
-# ============================================================
-# 2. XỬ LÝ THỜI GIAN
-# ============================================================
+# ==========================================
+# 1. TRIPS BY HOUR  →  01_hour.png
+# ==========================================
 
-uber_data$Date.Time <- as.POSIXct(
-  uber_data$Date.Time,
-  format = "%m/%d/%Y %H:%M:%S"
-)
+trips_by_hour <- load_result("trips_by_hour.csv")
 
-# Lấy giờ
-uber_data$Hour <- as.integer(
-  format(uber_data$Date.Time, "%H")
-)
-
-# Lấy thứ
-uber_data$Weekday <- weekdays(
-  uber_data$Date.Time
-)
-
-weekday_map <- c(
-  "Monday" = "Mon",
-  "Tuesday" = "Tue",
-  "Wednesday" = "Wed",
-  "Thursday" = "Thu",
-  "Friday" = "Fri",
-  "Saturday" = "Sat",
-  "Sunday" = "Sun"
-)
-
-uber_data$Weekday <- weekday_map[
-  uber_data$Weekday
-]
-
-uber_data$Weekday <- factor(
-  uber_data$Weekday,
-  levels = c(
-    "Mon",
-    "Tue",
-    "Wed",
-    "Thu",
-    "Fri",
-    "Sat",
-    "Sun"
-  )
-)
-
-# ============================================================
-# LẤY THÁNG TRỰC TIẾP TỪ Date.Time
-# ============================================================
-
-uber_data$Month <- format(
-  uber_data$Date.Time,
-  "%b"
-)
-
-uber_data$Month <- factor(
-  uber_data$Month,
-  levels = c(
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep"
-  )
-)
-# ============================================================
-# 3. TẠO THƯ MỤC LƯU HÌNH
-# ============================================================
-
-dir.create(
-  "output/figures",
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-# ============================================================
-# 4. BIỂU ĐỒ THEO GIỜ
-# ============================================================
-
-hour_data <- uber_data %>%
-  group_by(Hour) %>%
-  summarise(
-    Trips = n(),
-    .groups = "drop"
-  )
-
-p1 <- ggplot(
-  hour_data,
-  aes(
-    x = Hour,
-    y = Trips
-  )
-) +
-  geom_col() +
-  scale_x_continuous(
-    breaks = 0:23
+p1 <- ggplot(trips_by_hour, aes(x = Hour, y = Total_Trips)) +
+  geom_col(fill = "#276EF1", alpha = 0.85) +
+  geom_text(aes(label = scales::comma(Total_Trips)),
+            vjust = -0.4, size = 2.8, color = "grey30") +
+  scale_x_continuous(breaks = 0:23) +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.08))) +
+  labs(
+    title    = "Uber Trips by Hour of Day",
+    subtitle = "New York City — April to September 2014",
+    x        = "Hour of Day",
+    y        = "Total Trips"
   ) +
-  scale_y_continuous(
-    labels = comma
+  theme_uber()
+
+save_plot(p1, "01_hour.png", width = 12, height = 6)
+
+# ==========================================
+# 2. TRIPS BY MONTH  →  02_month.png
+# ==========================================
+
+trips_by_month <- load_result("trips_by_month.csv")
+trips_by_month$Month <- factor(trips_by_month$Month,
+  levels = c("Apr", "May", "Jun", "Jul", "Aug", "Sep"))
+
+p2 <- ggplot(trips_by_month, aes(x = Month, y = Total_Trips, fill = Month)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = scales::comma(Total_Trips)),
+            vjust = -0.4, size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = uber_colors) +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title    = "Uber Trips by Month",
+    subtitle = "New York City — April to September 2014",
+    x        = "Month",
+    y        = "Total Trips"
+  ) +
+  theme_uber()
+
+save_plot(p2, "02_month.png", width = 9, height = 6)
+
+# ==========================================
+# 3. TRIPS BY WEEKDAY  →  03_weekday.png
+# ==========================================
+
+trips_by_weekday <- load_result("trips_by_weekday.csv")
+trips_by_weekday$Weekday <- factor(trips_by_weekday$Weekday,
+  levels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+
+p3 <- ggplot(trips_by_weekday, aes(x = Weekday, y = Total_Trips, fill = Weekday)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = scales::comma(Total_Trips)),
+            vjust = -0.4, size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = uber_colors) +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title    = "Uber Trips by Day of Week",
+    subtitle = "New York City — April to September 2014",
+    x        = "Day of Week",
+    y        = "Total Trips"
+  ) +
+  theme_uber()
+
+save_plot(p3, "03_weekday.png", width = 9, height = 6)
+
+# ==========================================
+# 4. TRIPS BY BASE  →  04_base.png
+# ==========================================
+
+trips_by_base <- load_result("trips_by_base.csv")
+
+p4 <- ggplot(trips_by_base,
+             aes(x = reorder(Base, Total_Trips), y = Total_Trips, fill = Base)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = paste0(scales::comma(Total_Trips), " (", Percentage, "%)")),
+            hjust = -0.05, size = 3.2) +
+  coord_flip() +
+  scale_fill_manual(values = uber_colors) +
+  scale_x_discrete() +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.2))) +
+  labs(
+    title    = "Uber Trips by Dispatch Base",
+    subtitle = "New York City — April to September 2014",
+    x        = "Base",
+    y        = "Total Trips"
+  ) +
+  theme_uber()
+
+save_plot(p4, "04_base.png", width = 10, height = 5)
+
+# ==========================================
+# 5. PICKUP DENSITY MAP (ggplot)  →  05_location.png
+# ==========================================
+
+location_sample <- load_result("location_sample.csv")
+
+p5 <- ggplot(location_sample, aes(x = Lon, y = Lat)) +
+  stat_density_2d(
+    aes(fill = after_stat(density)),
+    geom  = "raster",
+    contour = FALSE,
+    n = 200
+  ) +
+  scale_fill_viridis_c(option = "inferno", name = "Density") +
+  coord_fixed(
+    xlim = c(-74.15, -73.70),
+    ylim = c(40.58, 40.92)
   ) +
   labs(
-    title = "So luong chuyen Uber theo gio",
-    subtitle = "New York City - April to September 2014",
-    x = "Gio trong ngay",
-    y = "So chuyen"
+    title    = "Uber Pickup Density — NYC",
+    subtitle = paste0("Based on ", scales::comma(nrow(location_sample)), " sampled pickups"),
+    x        = "Longitude",
+    y        = "Latitude"
   ) +
-  theme_minimal()
+  theme_uber()
 
-print(p1)
+save_plot(p5, "05_location.png", width = 9, height = 8)
 
-ggsave(
-  "output/figures/01_trips_by_hour.png",
-  p1,
-  width = 10,
-  height = 6,
-  dpi = 300
-)
+# ==========================================
+# 6. TOP 20 HOTSPOTS MAP  →  06_hotspots.png
+# ==========================================
 
-# ============================================================
-# 5. BIỂU ĐỒ THEO THÁNG
-# ============================================================
+top20 <- load_result("top20_hotspots.csv")
 
-month_data <- uber_data %>%
-  group_by(Month) %>%
-  summarise(
-    Trips = n(),
-    .groups = "drop"
-  )
-
-p2 <- ggplot(
-  month_data,
-  aes(
-    x = Month,
-    y = Trips
-  )
-) +
-  geom_col() +
-  scale_y_continuous(
-    labels = comma
+p6 <- ggplot(top20, aes(x = Longitude, y = Latitude, size = Trips, color = Trips)) +
+  geom_point(alpha = 0.8) +
+  geom_text(aes(label = Rank), size = 3, color = "white", fontface = "bold") +
+  scale_size_continuous(range = c(4, 18), labels = scales::comma) +
+  scale_color_viridis_c(option = "plasma", labels = scales::comma) +
+  coord_fixed(
+    xlim = c(-74.05, -73.92),
+    ylim = c(40.68, 40.85)
   ) +
   labs(
-    title = "So luong chuyen Uber theo thang",
-    subtitle = "New York City - April to September 2014",
-    x = "Thang",
-    y = "So chuyen"
+    title    = "Top 20 Uber Pickup Hotspots — NYC",
+    subtitle = "Circle size proportional to trip count",
+    x        = "Longitude",
+    y        = "Latitude",
+    size     = "Trips",
+    color    = "Trips"
   ) +
-  theme_minimal()
+  theme_uber()
 
-print(p2)
+save_plot(p6, "06_hotspots.png", width = 9, height = 8)
 
-ggsave(
-  "output/figures/02_trips_by_month.png",
-  p2,
-  width = 9,
-  height = 6,
-  dpi = 300
-)
+# ==========================================
+# 7. DAYTYPE COMPARISON  →  07_daytype.png
+# ==========================================
 
-# ============================================================
-# 6. BIỂU ĐỒ THEO THỨ
-# ============================================================
+trips_by_daytype <- load_result("trips_by_day_type.csv")
 
-weekday_data <- uber_data %>%
-  group_by(Weekday) %>%
-  summarise(
-    Trips = n(),
-    .groups = "drop"
-  )
-
-p3 <- ggplot(
-  weekday_data,
-  aes(
-    x = Weekday,
-    y = Trips
-  )
-) +
-  geom_col() +
-  scale_y_continuous(
-    labels = comma
-  ) +
+p7 <- ggplot(trips_by_daytype, aes(x = DayType, y = Total_Trips, fill = DayType)) +
+  geom_col(width = 0.5, show.legend = FALSE) +
+  geom_text(aes(label = scales::comma(Total_Trips)),
+            vjust = -0.4, size = 4, fontface = "bold") +
+  scale_fill_manual(values = c("Weekday" = "#276EF1", "Weekend" = "#FF6937")) +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.1))) +
   labs(
-    title = "So luong chuyen Uber theo thu trong tuan",
-    subtitle = "New York City - April to September 2014",
-    x = "Thu",
-    y = "So chuyen"
+    title    = "Uber Trips: Weekday vs Weekend",
+    subtitle = "New York City — April to September 2014",
+    x        = NULL,
+    y        = "Total Trips"
   ) +
-  theme_minimal()
+  theme_uber()
 
-print(p3)
+save_plot(p7, "07_daytype.png", width = 7, height = 6)
 
-ggsave(
-  "output/figures/03_trips_by_weekday.png",
-  p3,
-  width = 9,
-  height = 6,
-  dpi = 300
-)
+# ==========================================
+# 8. HOUR × DAYTYPE  →  08_hour_daytype.png
+# ==========================================
 
-# ============================================================
-# 7. HEATMAP: GIỜ × THỨ
-# ============================================================
+trips_hour_daytype <- load_result("trips_by_hour_daytype.csv")
 
-heatmap_data <- uber_data %>%
-  group_by(
-    Weekday,
-    Hour
-  ) %>%
-  summarise(
-    Trips = n(),
-    .groups = "drop"
-  )
-
-p4 <- ggplot(
-  heatmap_data,
-  aes(
-    x = Hour,
-    y = Weekday,
-    fill = Trips
-  )
-) +
-  geom_tile(
-    color = "white"
-  ) +
-  scale_x_continuous(
-    breaks = 0:23
-  ) +
-  scale_fill_gradient(
-    low = "white",
-    high = "red",
-    labels = comma
-  ) +
+p8 <- ggplot(trips_hour_daytype, aes(x = Hour, y = Total_Trips, color = DayType)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 0:23) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_color_manual(values = c("Weekday" = "#276EF1", "Weekend" = "#FF6937")) +
   labs(
-    title = "Heatmap so luong chuyen Uber theo gio va thu",
-    subtitle = "New York City - April to September 2014",
-    x = "Gio trong ngay",
-    y = "Thu trong tuan",
-    fill = "So chuyen"
+    title    = "Trips by Hour: Weekday vs Weekend",
+    subtitle = "New York City — April to September 2014",
+    x        = "Hour of Day",
+    y        = "Total Trips",
+    color    = "Day Type"
   ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(
-      angle = 45,
-      hjust = 1
-    )
-  )
+  theme_uber()
 
-print(p4)
+save_plot(p8, "08_hour_daytype.png", width = 12, height = 6)
 
-ggsave(
-  "output/figures/04_heatmap_hour_weekday.png",
-  p4,
-  width = 14,
-  height = 7,
-  dpi = 300
-)
+# ==========================================
+# 9. BASE × MONTH HEATMAP  →  09_base_month.png
+# ==========================================
 
-# ============================================================
-# 8. KẾT QUẢ
-# ============================================================
+trips_base_month <- load_result("trips_by_base_month.csv")
+trips_base_month$Month <- factor(trips_base_month$Month,
+  levels = c("Apr", "May", "Jun", "Jul", "Aug", "Sep"))
 
-cat("\n========================================\n")
-cat("HOAN THANH VISUALIZATION & HEATMAP\n")
-cat("========================================\n")
+p9 <- ggplot(trips_base_month, aes(x = Month, y = Base, fill = Total_Trips)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = scales::comma(Total_Trips)), size = 3, color = "white", fontface = "bold") +
+  scale_fill_gradient(low = "#E3F0FF", high = "#000000", labels = scales::comma) +
+  labs(
+    title    = "Trips by Base and Month",
+    subtitle = "New York City — April to September 2014",
+    x        = "Month",
+    y        = "Base",
+    fill     = "Trips"
+  ) +
+  theme_uber() +
+  theme(legend.position = "right")
 
-cat(
-  "Tong so chuyen:",
-  format(nrow(uber_data), big.mark = ","),
-  "\n"
-)
+save_plot(p9, "09_base_month.png", width = 10, height = 5)
 
-cat("\nGio cao diem:\n")
-print(
-  hour_data %>%
-    slice_max(Trips, n = 1)
-)
-
-cat("\nThang co nhieu chuyen nhat:\n")
-print(
-  month_data %>%
-    slice_max(Trips, n = 1)
-)
-
-cat("\nThứ có nhiều chuyến nhất:\n")
-print(
-  weekday_data %>%
-    slice_max(Trips, n = 1)
-)
-
-cat("\n4 bieu do da duoc luu tai:\n")
-cat("output/figures/\n")
+cat("\n04_visualization.R completed successfully.\n")
+cat("Figures saved to Output/figures/\n")

@@ -1,0 +1,29 @@
+Metric,Value
+Total Trips,4534327
+Average Trips Per Day,24778
+Busiest Date,2014-09-13
+Busiest Date Trips,43205
+Peak Hour,17
+Peak Hour Trips,336190
+Off Peak Hour,2
+Off Peak Hour Trips,45865
+Peak Month,Sep
+Peak Month Trips,1028136
+Monthly Growth Apr to Sep (%),82.1
+Peak Weekday,Thu
+Peak Weekday Trips,755145
+Weekday Total Trips,3398033
+Weekend Total Trips,1136294
+Weekday Share (%),74.9
+Weekend Share (%),25.1
+Weekday Avg Trips Per Day,25939
+Weekend Avg Trips Per Day,21852
+Weekday vs Weekend Avg Pct Higher,18.7
+Top Base,B02617
+Top Base Trips,1458853
+Top Base Share (%),32.17
+Lowest Base,B02512
+Lowest Base Trips,205673
+Top Hotspot Latitude,40.76
+Top Hotspot Longitude,-73.98
+Top Hotspot Trips,226692

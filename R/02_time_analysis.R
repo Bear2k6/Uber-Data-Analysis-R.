@@ -1,205 +1,174 @@
 # ==========================================
 # Uber Data Analysis Project
 # File: 02_time_analysis.R
-# Author: TV2
 # Purpose: Analyze Uber trip patterns over time
-# ==========================================
-
-# ==========================================
-# 1. LOAD LIBRARIES & CLEAN DATA
 # ==========================================
 
 source("R/00_setup.R")
 
-uber_data <- read.csv(
-  "Output/results/uber_clean.csv",
-  check.names = FALSE
+# ==========================================
+# 1. LOAD CLEAN DATA
+# ==========================================
+
+clean_file <- "Output/results/uber_clean.csv"
+if (!file.exists(clean_file)) {
+  stop("uber_clean.csv not found. Run 01_data_cleaning.R first.")
+}
+
+cat("Loading cleaned dataset...\n")
+uber_data <- readr::read_csv(
+  clean_file,
+  col_types = readr::cols(
+    `Date/Time` = readr::col_character(),
+    Lat         = readr::col_double(),
+    Lon         = readr::col_double(),
+    Base        = readr::col_character(),
+    Hour        = readr::col_integer(),
+    Day         = readr::col_integer(),
+    Date        = readr::col_date(),
+    Month       = readr::col_character(),
+    Weekday     = readr::col_character(),
+    DayType     = readr::col_character()
+  ),
+  show_col_types = FALSE
 )
 
-# Convert Date/Time again after reading CSV
-uber_data$`Date/Time` <- lubridate::mdy_hms(
-  uber_data$`Date/Time`
-)
+# Re-apply factor levels so ordering is correct
+month_levels   <- c("Apr", "May", "Jun", "Jul", "Aug", "Sep")
+weekday_levels <- c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+uber_data$Month   <- factor(uber_data$Month,   levels = month_levels)
+uber_data$Weekday <- factor(uber_data$Weekday, levels = weekday_levels)
+
+cat("Rows loaded:", format(nrow(uber_data), big.mark = ","), "\n")
 
 # ==========================================
-# 2. CREATE DATE
-# ==========================================
-
-uber_data$Date <- as.Date(
-  uber_data$`Date/Time`
-)
-
-# ==========================================
-# 3. CREATE WEEKDAY / WEEKEND
-# ==========================================
-
-uber_data$DayType <- ifelse(
-  lubridate::wday(uber_data$`Date/Time`) %in% c(1, 7),
-  "Weekend",
-  "Weekday"
-)
-
-# ==========================================
-# 4. ANALYSIS BY HOUR
+# 2. TRIPS BY HOUR
 # ==========================================
 
 trips_by_hour <- uber_data %>%
   group_by(Hour) %>%
-  summarise(
-    Total_Trips = n(),
-    .groups = "drop"
-  ) %>%
+  summarise(Total_Trips = n(), .groups = "drop") %>%
   arrange(Hour)
 
-cat("\n=== BẢNG SỐ CHUYẾN ĐI THEO GIỜ ===\n")
+cat("\n=== TRIPS BY HOUR ===\n")
 print(trips_by_hour)
 
 # ==========================================
-# 5. ANALYSIS BY DATE
+# 3. TRIPS BY DATE (daily)
 # ==========================================
 
 trips_by_date <- uber_data %>%
   group_by(Date) %>%
-  summarise(
-    Total_Trips = n(),
-    .groups = "drop"
-  ) %>%
+  summarise(Total_Trips = n(), .groups = "drop") %>%
   arrange(Date)
 
-cat("\n=== BẢNG SỐ CHUYẾN ĐI THEO NGÀY ===\n")
-print(head(trips_by_date, 20))
+busiest_date <- trips_by_date %>%
+  slice_max(Total_Trips, n = 1, with_ties = FALSE)
+
+cat("\n=== BUSIEST DATE ===\n")
+print(busiest_date)
 
 # ==========================================
-# 6. ANALYSIS BY DAY OF MONTH
+# 4. TRIPS BY DAY OF MONTH
 # ==========================================
 
 trips_by_day <- uber_data %>%
   group_by(Day) %>%
-  summarise(
-    Total_Trips = n(),
-    .groups = "drop"
-  ) %>%
+  summarise(Total_Trips = n(), .groups = "drop") %>%
   arrange(Day)
 
-cat("\n=== BẢNG SỐ CHUYẾN ĐI THEO NGÀY TRONG THÁNG ===\n")
+cat("\n=== TRIPS BY DAY OF MONTH ===\n")
 print(trips_by_day)
 
 # ==========================================
-# 7. ANALYSIS BY WEEKDAY
+# 5. TRIPS BY MONTH
+# ==========================================
+
+trips_by_month <- uber_data %>%
+  group_by(Month) %>%
+  summarise(Total_Trips = n(), .groups = "drop") %>%
+  arrange(Month)
+
+cat("\n=== TRIPS BY MONTH ===\n")
+print(trips_by_month)
+
+# ==========================================
+# 6. TRIPS BY WEEKDAY
 # ==========================================
 
 trips_by_weekday <- uber_data %>%
   group_by(Weekday) %>%
-  summarise(
-    Total_Trips = n(),
-    .groups = "drop"
-  ) %>%
-  arrange(
-    match(
-      Weekday,
-      c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-    )
-  )
+  summarise(Total_Trips = n(), .groups = "drop") %>%
+  arrange(Weekday)
 
-cat("\n=== BẢNG SỐ CHUYẾN ĐI THEO THỨ ===\n")
+cat("\n=== TRIPS BY WEEKDAY ===\n")
 print(trips_by_weekday)
 
 # ==========================================
-# 8. WEEKDAY VS WEEKEND
+# 7. WEEKDAY VS WEEKEND
 # ==========================================
 
 trips_by_day_type <- uber_data %>%
   group_by(DayType) %>%
-  summarise(
-    Total_Trips = n(),
-    .groups = "drop"
-  ) %>%
+  summarise(Total_Trips = n(), .groups = "drop") %>%
   arrange(desc(Total_Trips))
 
 cat("\n=== WEEKDAY VS WEEKEND ===\n")
 print(trips_by_day_type)
 
 # ==========================================
-# 9. ANALYSIS BY MONTH
+# 8. HOUR × DAYTYPE
 # ==========================================
 
-trips_by_month <- uber_data %>%
-  group_by(Month) %>%
-  summarise(
-    Total_Trips = n(),
-    .groups = "drop"
-  ) %>%
-  arrange(
-    match(
-      Month,
-      c("Apr", "May", "Jun", "Jul", "Aug", "Sep")
-    )
-  )
-
-cat("\n=== BẢNG SỐ CHUYẾN ĐI THEO THÁNG ===\n")
-print(trips_by_month)
-
-# ==========================================
-# 10. HOUR BY WEEKDAY/WEEKEND
-# ==========================================
-
-trips_by_hour_day_type <- uber_data %>%
+trips_by_hour_daytype <- uber_data %>%
   group_by(DayType, Hour) %>%
-  summarise(
-    Total_Trips = n(),
-    .groups = "drop"
-  ) %>%
+  summarise(Total_Trips = n(), .groups = "drop") %>%
   arrange(DayType, Hour)
 
-cat("\n=== SỐ CHUYẾN THEO GIỜ VÀ DAY TYPE ===\n")
-print(trips_by_hour_day_type)
+cat("\n=== TRIPS BY HOUR × DAYTYPE ===\n")
+print(trips_by_hour_daytype)
+
+# ==========================================
+# 9. HOUR × WEEKDAY HEATMAP DATA
+# ==========================================
+
+trips_by_hour_weekday <- uber_data %>%
+  group_by(Weekday, Hour) %>%
+  summarise(Total_Trips = n(), .groups = "drop") %>%
+  arrange(Weekday, Hour)
+
+# ==========================================
+# 10. AVERAGE DAILY TRIPS BY DAYTYPE
+# ==========================================
+
+avg_by_daytype <- uber_data %>%
+  group_by(Date, DayType) %>%
+  summarise(Daily_Trips = n(), .groups = "drop") %>%
+  group_by(DayType) %>%
+  summarise(
+    Num_Days             = n(),
+    Avg_Trips_Per_Day    = round(mean(Daily_Trips), 0),
+    Median_Trips_Per_Day = round(median(Daily_Trips), 0),
+    .groups = "drop"
+  )
+
+cat("\n=== AVG DAILY TRIPS BY DAYTYPE ===\n")
+print(avg_by_daytype)
 
 # ==========================================
 # 11. EXPORT RESULTS
 # ==========================================
 
-write.csv(
-  trips_by_hour,
-  "Output/results/trips_by_hour.csv",
-  row.names = FALSE
-)
+readr::write_csv(trips_by_hour,         "Output/results/trips_by_hour.csv")
+readr::write_csv(trips_by_date,         "Output/results/trips_by_date.csv")
+readr::write_csv(trips_by_day,          "Output/results/trips_by_day.csv")
+readr::write_csv(trips_by_month,        "Output/results/trips_by_month.csv")
+readr::write_csv(trips_by_weekday,      "Output/results/trips_by_weekday.csv")
+readr::write_csv(trips_by_day_type,     "Output/results/trips_by_day_type.csv")
+readr::write_csv(trips_by_hour_daytype, "Output/results/trips_by_hour_daytype.csv")
+readr::write_csv(trips_by_hour_weekday, "Output/results/trips_by_hour_weekday.csv")
+readr::write_csv(avg_by_daytype,        "Output/results/avg_by_daytype.csv")
 
-write.csv(
-  trips_by_date,
-  "Output/results/trips_by_date.csv",
-  row.names = FALSE
-)
-
-write.csv(
-  trips_by_day,
-  "Output/results/trips_by_day.csv",
-  row.names = FALSE
-)
-
-write.csv(
-  trips_by_weekday,
-  "Output/results/trips_by_weekday.csv",
-  row.names = FALSE
-)
-
-write.csv(
-  trips_by_day_type,
-  "Output/results/trips_by_day_type.csv",
-  row.names = FALSE
-)
-
-write.csv(
-  trips_by_month,
-  "Output/results/trips_by_month.csv",
-  row.names = FALSE
-)
-
-write.csv(
-  trips_by_hour_day_type,
-  "Output/results/trips_by_hour_day_type.csv",
-  row.names = FALSE
-)
-
-cat(
-  "\nTime analysis completed and results exported successfully!\n"
-)
+cat("\n02_time_analysis.R completed successfully.\n")
+cat("Results exported to Output/results/\n")

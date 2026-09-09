@@ -1,187 +1,197 @@
 # ==========================================
 # Uber Data Analysis Project
 # File: 01_data_cleaning.R
-# Author: TV1
-# Purpose: Load, clean and transform Uber data
+# Purpose: Load, clean, validate and export Uber data
 # ==========================================
 
 source("R/00_setup.R")
 
 # ==========================================
-# 0. CREATE OUTPUT DIRECTORIES
+# 1. READ RAW CSV FILES
 # ==========================================
 
-dir.create(
-  "Output/results",
-  recursive = TRUE,
-  showWarnings = FALSE
+data_files <- list(
+  apr = "Data/uber-raw-data-apr14.csv",
+  may = "Data/uber-raw-data-may14.csv",
+  jun = "Data/uber-raw-data-jun14.csv",
+  jul = "Data/uber-raw-data-jul14.csv",
+  aug = "Data/uber-raw-data-aug14.csv",
+  sep = "Data/uber-raw-data-sep14.csv"
 )
 
-dir.create(
-  "Output/figures",
-  recursive = TRUE,
-  showWarnings = FALSE
-)
+# Verify all files exist before reading
+missing_files <- data_files[!file.exists(unlist(data_files))]
+if (length(missing_files) > 0) {
+  stop(paste(
+    "Missing data files:",
+    paste(unlist(missing_files), collapse = ", ")
+  ))
+}
+
+cat("Reading 6 raw CSV files...\n")
+
+read_uber_csv <- function(path) {
+  df <- readr::read_csv(
+    path,
+    col_types = readr::cols(
+      `Date/Time` = readr::col_character(),
+      Lat         = readr::col_double(),
+      Lon         = readr::col_double(),
+      Base        = readr::col_character()
+    ),
+    show_col_types = FALSE
+  )
+  return(df)
+}
+
+apr <- read_uber_csv(data_files$apr)
+may <- read_uber_csv(data_files$may)
+jun <- read_uber_csv(data_files$jun)
+jul <- read_uber_csv(data_files$jul)
+aug <- read_uber_csv(data_files$aug)
+sep <- read_uber_csv(data_files$sep)
 
 # ==========================================
-# 1. READ RAW DATA
+# 2. PER-FILE DIMENSION CHECK
 # ==========================================
 
-apr <- read.csv(
-  "Data/uber-raw-data-apr14.csv",
-  check.names = FALSE
+cat("\n===== PER-FILE DIMENSIONS =====\n")
+file_dims <- data.frame(
+  File  = names(data_files),
+  Rows  = c(nrow(apr), nrow(may), nrow(jun), nrow(jul), nrow(aug), nrow(sep)),
+  Cols  = c(ncol(apr), ncol(may), ncol(jun), ncol(jul), ncol(aug), ncol(sep))
 )
-
-may <- read.csv(
-  "Data/uber-raw-data-may14.csv",
-  check.names = FALSE
-)
-
-jun <- read.csv(
-  "Data/uber-raw-data-jun14.csv",
-  check.names = FALSE
-)
-
-jul <- read.csv(
-  "Data/uber-raw-data-jul14.csv",
-  check.names = FALSE
-)
-
-aug <- read.csv(
-  "Data/uber-raw-data-aug14.csv",
-  check.names = FALSE
-)
-
-sep <- read.csv(
-  "Data/uber-raw-data-sep14.csv",
-  check.names = FALSE
-)
+print(file_dims)
 
 # ==========================================
-# 2. COMBINE ALL DATASETS
+# 3. COMBINE ALL DATASETS
 # ==========================================
 
-uber_data <- dplyr::bind_rows(
-  apr,
-  may,
-  jun,
-  jul,
-  aug,
-  sep
-)
+uber_data <- dplyr::bind_rows(apr, may, jun, jul, aug, sep)
+rm(apr, may, jun, jul, aug, sep)  # free memory
 
-cat("Total rows:", nrow(uber_data), "\n")
+cat("\nTotal rows after combining:", format(nrow(uber_data), big.mark = ","), "\n")
 cat("Total columns:", ncol(uber_data), "\n")
 
 # ==========================================
-# 3. CHECK DATA STRUCTURE
+# 4. VALIDATE REQUIRED COLUMNS
 # ==========================================
 
-cat("\n===== DATA STRUCTURE =====\n")
+required_cols <- c("Date/Time", "Lat", "Lon", "Base")
+missing_cols <- setdiff(required_cols, names(uber_data))
+if (length(missing_cols) > 0) {
+  stop(paste("Missing required columns:", paste(missing_cols, collapse = ", ")))
+}
+
+cat("\n===== COLUMN NAMES =====\n")
+print(names(uber_data))
+
+cat("\n===== DATA TYPES =====\n")
 str(uber_data)
 
-cat("\n===== SUMMARY =====\n")
-print(summary(uber_data))
-
 # ==========================================
-# 4. CHECK MISSING VALUES
+# 5. CHECK MISSING VALUES
 # ==========================================
 
 missing_values <- colSums(is.na(uber_data))
-
 cat("\n===== MISSING VALUES =====\n")
 print(missing_values)
 
 # ==========================================
-# 5. CHECK DUPLICATED ROWS
+# 6. CHECK DUPLICATED ROWS (report only, do not remove)
 # ==========================================
 
 duplicate_count <- sum(duplicated(uber_data))
-
-cat(
-  "\nDuplicated rows:",
-  duplicate_count,
-  "\n"
-)
+cat("\n===== DUPLICATE ROWS =====\n")
+cat("Duplicated rows detected:", format(duplicate_count, big.mark = ","), "\n")
+cat("NOTE: Duplicates are reported only, not removed.\n")
 
 # ==========================================
-# 6. CONVERT DATE/TIME
+# 7. VALIDATE LAT/LON RANGES
 # ==========================================
 
-uber_data$`Date/Time` <- lubridate::mdy_hms(
-  uber_data$`Date/Time`
+invalid_lat <- sum(!is.na(uber_data$Lat) & (uber_data$Lat < -90 | uber_data$Lat > 90))
+invalid_lon <- sum(!is.na(uber_data$Lon) & (uber_data$Lon < -180 | uber_data$Lon > 180))
+cat("\n===== LAT/LON VALIDATION =====\n")
+cat("Invalid Latitude values  :", invalid_lat, "\n")
+cat("Invalid Longitude values :", invalid_lon, "\n")
+
+# NYC bounding box check
+nyc_count <- sum(
+  !is.na(uber_data$Lat) & !is.na(uber_data$Lon) &
+  uber_data$Lat >= 40.5774 & uber_data$Lat <= 40.9176 &
+  uber_data$Lon >= -74.1500 & uber_data$Lon <= -73.7004
 )
+cat("Points within NYC bounding box:", format(nyc_count, big.mark = ","), "\n")
 
 # ==========================================
-# 7. CREATE TIME FEATURES
+# 8. PARSE DATE/TIME
 # ==========================================
 
-uber_data$Hour <- lubridate::hour(
-  uber_data$`Date/Time`
-)
+cat("\nParsing Date/Time column...\n")
+uber_data$datetime_parsed <- lubridate::mdy_hms(uber_data$`Date/Time`)
 
-uber_data$Day <- lubridate::day(
-  uber_data$`Date/Time`
-)
+parse_failures <- sum(is.na(uber_data$datetime_parsed))
+if (parse_failures > 0) {
+  warning(paste(
+    parse_failures,
+    "rows failed Date/Time parsing. These rows will have NA time features."
+  ))
+}
 
-uber_data$Date <- as.Date(
-  uber_data$`Date/Time`
-)
+# ==========================================
+# 9. CREATE TIME FEATURES
+# ==========================================
 
-uber_data$Month <- lubridate::month(
-  uber_data$`Date/Time`,
+uber_data$Hour    <- lubridate::hour(uber_data$datetime_parsed)
+uber_data$Day     <- lubridate::day(uber_data$datetime_parsed)
+uber_data$Date    <- as.Date(uber_data$datetime_parsed)
+
+uber_data$Month   <- lubridate::month(
+  uber_data$datetime_parsed,
   label = TRUE,
-  abbr = TRUE
+  abbr  = TRUE
 )
 
 uber_data$Weekday <- lubridate::wday(
-  uber_data$`Date/Time`,
+  uber_data$datetime_parsed,
   label = TRUE,
-  abbr = TRUE
+  abbr  = TRUE,
+  week_start = 1  # Monday = 1
 )
 
+# DayType: Sun=1, Sat=7 in default wday; with week_start=1: Sat=6, Sun=7
 uber_data$DayType <- ifelse(
-  lubridate::wday(uber_data$`Date/Time`) %in% c(1, 7),
+  lubridate::wday(uber_data$datetime_parsed, week_start = 1) >= 6,
   "Weekend",
   "Weekday"
 )
 
+# Drop helper column
+uber_data$datetime_parsed <- NULL
+
 # ==========================================
-# 8. FINAL CHECK
+# 10. FINAL VALIDATION
 # ==========================================
 
-cat("\n===== FINAL DATA =====\n")
-print(head(uber_data))
-
-cat(
-  "\nRows:",
-  nrow(uber_data),
-  "\n"
-)
-
-cat(
-  "Columns:",
-  ncol(uber_data),
-  "\n"
-)
+cat("\n===== FINAL DATASET SUMMARY =====\n")
+cat("Rows   :", format(nrow(uber_data), big.mark = ","), "\n")
+cat("Columns:", ncol(uber_data), "\n")
 
 cat("\n===== FINAL MISSING VALUES =====\n")
 print(colSums(is.na(uber_data)))
 
+cat("\n===== SAMPLE ROWS =====\n")
+print(head(uber_data, 5))
+
 # ==========================================
-# 9. EXPORT CLEAN DATASET
+# 11. EXPORT CLEAN DATASET
 # ==========================================
 
-write.csv(
-  uber_data,
-  "Output/results/uber_clean.csv",
-  row.names = FALSE
-)
+output_path <- "Output/results/uber_clean.csv"
 
-cat(
-  "\nClean dataset exported successfully!\n"
-)
+readr::write_csv(uber_data, output_path)
 
-cat(
-  "Output: Output/results/uber_clean.csv\n"
-)
+cat(paste("\nClean dataset exported to:", output_path, "\n"))
+cat(paste("Total rows:", format(nrow(uber_data), big.mark = ","), "\n"))
+cat("01_data_cleaning.R completed successfully.\n")
