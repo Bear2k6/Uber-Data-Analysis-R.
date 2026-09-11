@@ -1,6 +1,6 @@
 # ==========================================
 # Uber Data Analysis Project
-# File: 05_insight_dashboard.R
+# File: 06_insight_dashboard.R
 # Purpose: Compute and export key insights from analysis results
 # ==========================================
 
@@ -11,7 +11,7 @@ source("R/00_setup.R")
 # ==========================================
 
 load_result <- function(filename) {
-  path <- file.path("Output/results", filename)
+  path <- file.path("output/results", filename)
   if (!file.exists(path)) {
     stop(paste("Required file not found:", path,
                "\nRun preceding analysis scripts first."))
@@ -210,7 +210,7 @@ cat("\nTop Hotspot              : Lat =", top_hotspot$Latitude,
 # 5. EXPORT
 # ==========================================
 
-readr::write_csv(insights_df, "Output/results/insights.csv")
+readr::write_csv(insights_df, "output/results/insights.csv")
 
-cat("\n05_insight_dashboard.R completed successfully.\n")
-cat("Insights exported to Output/results/insights.csv\n")
+cat("\n06_insight_dashboard.R completed successfully.\n")
+cat("Insights exported to output/results/insights.csv\n")

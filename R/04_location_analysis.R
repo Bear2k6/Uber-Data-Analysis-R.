@@ -1,6 +1,6 @@
 # ==========================================
 # Uber Data Analysis Project
-# File: 03_location_analysis.R
+# File: 04_location_analysis.R
 # Purpose: Analyze geographic distribution of Uber pickups
 # ==========================================
 
@@ -10,7 +10,7 @@ source("R/00_setup.R")
 # 1. LOAD CLEAN DATA
 # ==========================================
 
-clean_file <- "Output/results/uber_clean.csv"
+clean_file <- "output/results/uber_clean.csv"
 if (!file.exists(clean_file)) {
   stop("uber_clean.csv not found. Run 01_data_cleaning.R first.")
 }
@@ -190,7 +190,7 @@ if ("Base" %in% names(nyc_data)) {
   cat("\n=== LOCATION SUMMARY BY BASE ===\n")
   print(location_by_base)
 
-  readr::write_csv(location_by_base, "Output/results/location_by_base.csv")
+  readr::write_csv(location_by_base, "output/results/location_by_base.csv")
 }
 
 # ==========================================
@@ -208,11 +208,11 @@ cat("\nSample size for visualization:", format(nrow(location_sample), big.mark =
 # 11. EXPORT RESULTS
 # ==========================================
 
-readr::write_csv(coordinate_quality, "Output/results/coordinate_quality.csv")
-readr::write_csv(location_summary,   "Output/results/location_summary.csv")
-readr::write_csv(location_grid,      "Output/results/location_grid_counts.csv")
-readr::write_csv(top20_hotspots,     "Output/results/top20_hotspots.csv")
-readr::write_csv(location_sample,    "Output/results/location_sample.csv")
+readr::write_csv(coordinate_quality, "output/results/coordinate_quality.csv")
+readr::write_csv(location_summary,   "output/results/location_summary.csv")
+readr::write_csv(location_grid,      "output/results/location_grid_counts.csv")
+readr::write_csv(top20_hotspots,     "output/results/top20_hotspots.csv")
+readr::write_csv(location_sample,    "output/results/location_sample.csv")
 
 # ==========================================
 # 12. SUMMARY
@@ -230,5 +230,5 @@ cat("Top hotspot              : Lat =", top20_hotspots$Latitude[1],
     " Lon =", top20_hotspots$Longitude[1],
     " Trips =", format(top20_hotspots$Trips[1], big.mark = ","), "\n")
 
-cat("\n03_location_analysis.R completed successfully.\n")
-cat("Results exported to Output/results/\n")
+cat("\n04_location_analysis.R completed successfully.\n")
+cat("Results exported to output/results/\n")

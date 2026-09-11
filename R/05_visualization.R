@@ -1,6 +1,6 @@
 # ==========================================
 # Uber Data Analysis Project
-# File: 04_visualization.R
+# File: 05_visualization.R
 # Purpose: Create all analysis charts from pre-computed results
 # ==========================================
 
@@ -11,7 +11,7 @@ source("R/00_setup.R")
 # ==========================================
 
 load_result <- function(filename) {
-  path <- file.path("Output/results", filename)
+  path <- file.path("output/results", filename)
   if (!file.exists(path)) {
     stop(paste("Required result file not found:", path,
                "\nRun the analysis scripts first."))
@@ -21,8 +21,8 @@ load_result <- function(filename) {
 
 # Uber brand color palette
 uber_colors <- c(
-  "#000000", "#276EF1", "#09B374", "#FF6937",
-  "#FFCD00", "#8C1932", "#9B51E0"
+  "#000000", "#276EF1", "#52677E", "#75899F",
+  "#A5B9CD", "#163C68", "#D2DCE7"
 )
 
 # Common theme
@@ -37,7 +37,7 @@ theme_uber <- function() {
 }
 
 save_plot <- function(plot, filename, width = 10, height = 6) {
-  path <- file.path("Output/figures", filename)
+  path <- file.path("output/figures", filename)
   ggsave(path, plot, width = width, height = height, dpi = 150)
   cat("Saved:", path, "\n")
 }
@@ -202,7 +202,7 @@ p7 <- ggplot(trips_by_daytype, aes(x = DayType, y = Total_Trips, fill = DayType)
   geom_col(width = 0.5, show.legend = FALSE) +
   geom_text(aes(label = scales::comma(Total_Trips)),
             vjust = -0.4, size = 4, fontface = "bold") +
-  scale_fill_manual(values = c("Weekday" = "#276EF1", "Weekend" = "#FF6937")) +
+  scale_fill_manual(values = c("Weekday" = "#276EF1", "Weekend" = "#75899F")) +
   scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.1))) +
   labs(
     title    = "Uber Trips: Weekday vs Weekend",
@@ -225,7 +225,7 @@ p8 <- ggplot(trips_hour_daytype, aes(x = Hour, y = Total_Trips, color = DayType)
   geom_point(size = 2) +
   scale_x_continuous(breaks = 0:23) +
   scale_y_continuous(labels = scales::comma) +
-  scale_color_manual(values = c("Weekday" = "#276EF1", "Weekend" = "#FF6937")) +
+  scale_color_manual(values = c("Weekday" = "#276EF1", "Weekend" = "#75899F")) +
   labs(
     title    = "Trips by Hour: Weekday vs Weekend",
     subtitle = "New York City — April to September 2014",
@@ -248,7 +248,7 @@ trips_base_month$Month <- factor(trips_base_month$Month,
 p9 <- ggplot(trips_base_month, aes(x = Month, y = Base, fill = Total_Trips)) +
   geom_tile(color = "white", linewidth = 0.5) +
   geom_text(aes(label = scales::comma(Total_Trips)), size = 3, color = "white", fontface = "bold") +
-  scale_fill_gradient(low = "#E3F0FF", high = "#000000", labels = scales::comma) +
+  scale_fill_gradient(low = "#416C9A", high = "#102D50", labels = scales::comma) +
   labs(
     title    = "Trips by Base and Month",
     subtitle = "New York City — April to September 2014",
@@ -261,5 +261,6 @@ p9 <- ggplot(trips_base_month, aes(x = Month, y = Base, fill = Total_Trips)) +
 
 save_plot(p9, "09_base_month.png", width = 10, height = 5)
 
-cat("\n04_visualization.R completed successfully.\n")
-cat("Figures saved to Output/figures/\n")
+cat("\n05_visualization.R completed successfully.\n")
+cat("Figures saved to output/figures/\n")
+

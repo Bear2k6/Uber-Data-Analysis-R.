@@ -1,26 +1,43 @@
-# Required packages
+.libPaths(c(".r-library", .libPaths()))
+# ==========================================
+# Uber Data Analysis Project
+# File: 00_setup.R
+# Purpose: Install and load all required packages
+# ==========================================
+
 packages <- c(
   "ggplot2",
   "dplyr",
   "tidyr",
   "lubridate",
   "ggthemes",
-  "scales"
+  "scales",
+  "readr",
+  "shiny",
+  "bslib",
+  "leaflet",
+  "DT", "plotly"
 )
 
 # Install missing packages
 for (pkg in packages) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
-    install.packages(pkg)
+    message(paste("Installing package:", pkg))
+    install.packages(pkg, repos = "https://cloud.r-project.org")
   }
 }
 
-# Load packages
+# Load core analysis packages
 library(ggplot2)
 library(dplyr)
 library(tidyr)
 library(lubridate)
 library(ggthemes)
 library(scales)
+library(readr)
+
+# Ensure output directories exist
+dir.create("output/results", recursive = TRUE, showWarnings = FALSE)
+dir.create("output/figures", recursive = TRUE, showWarnings = FALSE)
 
 cat("All required packages are ready.\n")
