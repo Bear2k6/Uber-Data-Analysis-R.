@@ -1,3 +1,4 @@
+.libPaths(c(".r-library", .libPaths()))
 # ==========================================
 # Uber Data Analysis Project
 # File: 00_setup.R
@@ -15,7 +16,7 @@ packages <- c(
   "shiny",
   "bslib",
   "leaflet",
-  "DT"
+  "DT", "plotly"
 )
 
 # Install missing packages
@@ -36,7 +37,7 @@ library(scales)
 library(readr)
 
 # Ensure output directories exist
-dir.create("Output/results", recursive = TRUE, showWarnings = FALSE)
-dir.create("Output/figures", recursive = TRUE, showWarnings = FALSE)
+dir.create("output/results", recursive = TRUE, showWarnings = FALSE)
+dir.create("output/figures", recursive = TRUE, showWarnings = FALSE)
 
 cat("All required packages are ready.\n")

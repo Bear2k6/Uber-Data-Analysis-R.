@@ -11,12 +11,12 @@ source("R/00_setup.R")
 # ==========================================
 
 data_files <- list(
-  apr = "Data/uber-raw-data-apr14.csv",
-  may = "Data/uber-raw-data-may14.csv",
-  jun = "Data/uber-raw-data-jun14.csv",
-  jul = "Data/uber-raw-data-jul14.csv",
-  aug = "Data/uber-raw-data-aug14.csv",
-  sep = "Data/uber-raw-data-sep14.csv"
+  apr = "data/uber-raw-data-apr14.csv",
+  may = "data/uber-raw-data-may14.csv",
+  jun = "data/uber-raw-data-jun14.csv",
+  jul = "data/uber-raw-data-jul14.csv",
+  aug = "data/uber-raw-data-aug14.csv",
+  sep = "data/uber-raw-data-sep14.csv"
 )
 
 # Verify all files exist before reading
@@ -150,13 +150,13 @@ uber_data$Date    <- as.Date(uber_data$datetime_parsed)
 uber_data$Month   <- lubridate::month(
   uber_data$datetime_parsed,
   label = TRUE,
-  abbr  = TRUE
+  abbr  = TRUE, locale = "C"
 )
 
 uber_data$Weekday <- lubridate::wday(
   uber_data$datetime_parsed,
   label = TRUE,
-  abbr  = TRUE,
+  abbr  = TRUE, locale = "C",
   week_start = 1  # Monday = 1
 )
 
@@ -188,10 +188,15 @@ print(head(uber_data, 5))
 # 11. EXPORT CLEAN DATASET
 # ==========================================
 
-output_path <- "Output/results/uber_clean.csv"
+output_path <- "output/results/uber_clean.csv"
 
 readr::write_csv(uber_data, output_path)
 
 cat(paste("\nClean dataset exported to:", output_path, "\n"))
 cat(paste("Total rows:", format(nrow(uber_data), big.mark = ","), "\n"))
 cat("01_data_cleaning.R completed successfully.\n")
+readr::write_csv(data.frame(
+  Metric = c("Raw records", "Duplicate rows retained", "Date parsing failures", names(missing_values)),
+  Count = c(nrow(uber_data), duplicate_count, parse_failures, unname(missing_values))
+), "output/results/cleaning_quality.csv")
+

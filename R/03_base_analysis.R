@@ -10,7 +10,7 @@ source("R/00_setup.R")
 # 1. LOAD CLEAN DATA
 # ==========================================
 
-clean_file <- "Output/results/uber_clean.csv"
+clean_file <- "output/results/uber_clean.csv"
 if (!file.exists(clean_file)) {
   stop("uber_clean.csv not found. Run 01_data_cleaning.R first.")
 }
@@ -116,11 +116,11 @@ print(trips_by_base_weekday)
 # 7. EXPORT RESULTS
 # ==========================================
 
-readr::write_csv(trips_by_base,         "Output/results/trips_by_base.csv")
-readr::write_csv(most_active_base,      "Output/results/most_active_base.csv")
-readr::write_csv(least_active_base,     "Output/results/least_active_base.csv")
-readr::write_csv(trips_by_base_month,   "Output/results/trips_by_base_month.csv")
-readr::write_csv(trips_by_base_weekday, "Output/results/trips_by_base_weekday.csv")
+readr::write_csv(trips_by_base,         "output/results/trips_by_base.csv")
+readr::write_csv(most_active_base,      "output/results/most_active_base.csv")
+readr::write_csv(least_active_base,     "output/results/least_active_base.csv")
+readr::write_csv(trips_by_base_month,   "output/results/trips_by_base_month.csv")
+readr::write_csv(trips_by_base_weekday, "output/results/trips_by_base_weekday.csv")
 
 # ==========================================
 # 8. SUMMARY
@@ -138,4 +138,4 @@ cat("Least active Base :", least_active_base$Base,
     "trips (", least_active_base$Percentage, "%)\n")
 
 cat("\n03_base_analysis.R completed successfully.\n")
-cat("Results exported to Output/results/\n")
+cat("Results exported to output/results/\n")

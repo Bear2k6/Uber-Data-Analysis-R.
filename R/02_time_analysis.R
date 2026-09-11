@@ -10,7 +10,7 @@ source("R/00_setup.R")
 # 1. LOAD CLEAN DATA
 # ==========================================
 
-clean_file <- "Output/results/uber_clean.csv"
+clean_file <- "output/results/uber_clean.csv"
 if (!file.exists(clean_file)) {
   stop("uber_clean.csv not found. Run 01_data_cleaning.R first.")
 }
@@ -160,15 +160,15 @@ print(avg_by_daytype)
 # 11. EXPORT RESULTS
 # ==========================================
 
-readr::write_csv(trips_by_hour,         "Output/results/trips_by_hour.csv")
-readr::write_csv(trips_by_date,         "Output/results/trips_by_date.csv")
-readr::write_csv(trips_by_day,          "Output/results/trips_by_day.csv")
-readr::write_csv(trips_by_month,        "Output/results/trips_by_month.csv")
-readr::write_csv(trips_by_weekday,      "Output/results/trips_by_weekday.csv")
-readr::write_csv(trips_by_day_type,     "Output/results/trips_by_day_type.csv")
-readr::write_csv(trips_by_hour_daytype, "Output/results/trips_by_hour_daytype.csv")
-readr::write_csv(trips_by_hour_weekday, "Output/results/trips_by_hour_weekday.csv")
-readr::write_csv(avg_by_daytype,        "Output/results/avg_by_daytype.csv")
+readr::write_csv(trips_by_hour,         "output/results/trips_by_hour.csv")
+readr::write_csv(trips_by_date,         "output/results/trips_by_date.csv")
+readr::write_csv(trips_by_day,          "output/results/trips_by_day.csv")
+readr::write_csv(trips_by_month,        "output/results/trips_by_month.csv")
+readr::write_csv(trips_by_weekday,      "output/results/trips_by_weekday.csv")
+readr::write_csv(trips_by_day_type,     "output/results/trips_by_day_type.csv")
+readr::write_csv(trips_by_hour_daytype, "output/results/trips_by_hour_daytype.csv")
+readr::write_csv(trips_by_hour_weekday, "output/results/trips_by_hour_weekday.csv")
+readr::write_csv(avg_by_daytype,        "output/results/avg_by_daytype.csv")
 
 cat("\n02_time_analysis.R completed successfully.\n")
-cat("Results exported to Output/results/\n")
+cat("Results exported to output/results/\n")

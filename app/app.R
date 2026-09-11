@@ -1,963 +1,213 @@
-# ==========================================
-# Uber NYC Trip Analytics Dashboard
-# app/app.R  —  Single-file Shiny App
-# ==========================================
-#
-# Run with: shiny::runApp("app")
-# ==========================================
-
-# ---- Required packages ----
-required_pkgs <- c("shiny", "bslib", "dplyr", "ggplot2", "scales",
-                   "leaflet", "DT", "readr", "tidyr")
-for (pkg in required_pkgs) {
-  if (!requireNamespace(pkg, quietly = TRUE)) {
-    install.packages(pkg, repos = "https://cloud.r-project.org")
+# Uber NYC Demand Intelligence: compact aggregates only, loaded once at startup.
+options(sass.cache = FALSE)
+# Windows shells can inherit an invalid Unix locale; Unicode UI needs UTF-8.
+if (.Platform$OS.type == "windows") invisible(Sys.setlocale("LC_CTYPE", "English_United States.utf8"))
+project_root <- if (file.exists("Main.R")) normalizePath(".") else normalizePath("..")
+.libPaths(c(file.path(project_root, ".r-library"), .libPaths()))
+required_pkgs <- c("shiny", "bslib", "dplyr", "ggplot2", "scales", "leaflet", "DT", "readr", "tidyr", "plotly")
+missing_pkgs <- required_pkgs[!vapply(required_pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_pkgs)) stop("Missing packages: ", paste(missing_pkgs, collapse = ", "),
+  ". Run Rscript R/00_setup.R from the repository root.")
+invisible(lapply(required_pkgs, library, character.only = TRUE))
+source(file.path(project_root, "app/helpers.R"), local = TRUE)
+out <- function(...) file.path(project_root, "output", ...)
+time_cube <- read_checked(out("dashboard/dashboard_time_cube.csv"), c("Date","Month","Weekday","DayType","Hour","Base","Total_Trips"))
+geo_cube <- read_checked(out("dashboard/dashboard_geo_cube.csv"), c("Month","Base","Lat_Grid","Lon_Grid","Total_Trips"))
+location_summary <- read_checked(out("results/location_summary.csv"), c("Metric","Value"))
+coordinate_quality <- read_checked(out("results/coordinate_quality.csv"), c("Metric","Count"))
+cleaning_quality <- read_checked(out("results/cleaning_quality.csv"), c("Metric","Count"))
+if (!inherits(time_cube$Date,"Date") || any(!time_cube$Month %in% month_levels) ||
+    any(!time_cube$Weekday %in% weekday_levels) || any(!time_cube$Hour %in% 0:23))
+  stop("Invalid dashboard dimensions. Run Rscript Main.R.")
+metric <- function(name) {
+  v <- location_summary$Value[location_summary$Metric == name]
+  if (length(v) != 1 || !is.finite(v)) stop("Invalid location summary metric: ",name,". Run Rscript Main.R.")
+  v
+}
+coverage <- metric("Percentage inside NYC (%)")
+stopifnot(coverage >= 0, coverage <= 100, sum(geo_cube$Total_Trips) == metric("Records inside NYC bbox"),
+          sum(time_cube$Total_Trips) == metric("Total Records"))
+calendar <- distinct(time_cube, Date, Month, Weekday, DayType)
+bases <- sort(unique(time_cube$Base))
+source(file.path(project_root,"app/i18n.R"), local=TRUE, encoding="UTF-8")
+source(file.path(project_root,"app/components.R"), local=TRUE, encoding="UTF-8")
+model_paths <- c("model_metrics.csv","predictions.csv","feature_importance.csv")
+model_available <- all(file.exists(out("model",model_paths)))
+if(model_available) {
+  model_metrics <- read_checked(out("model/model_metrics.csv"),c("Model","MAE","RMSE","MAPE","R2","Train_Start","Train_End","Test_Start","Test_End"))
+  predictions <- read_checked(out("model/predictions.csv"),c("Date","Hour","Actual","Baseline","Prediction","Residual"))
+  importance <- read_checked(out("model/feature_importance.csv"),c("Feature","Importance"))
+}
+# Explicit allowlist excludes raw/cleaned trips and the pickup-level map sample.
+explorer <- list("Time cube"=time_cube,"Geographic cube"=geo_cube,
+  "Hourly totals"=aggregate_trips(time_cube,"Hour"),"Daily totals"=aggregate_trips(time_cube,"Date"),
+  "Monthly totals"=aggregate_trips(time_cube,"Month"),"Weekday totals"=aggregate_trips(time_cube,"Weekday"),
+  "Base totals"=aggregate_trips(time_cube,"Base"),"Base by month"=aggregate_trips(time_cube,c("Base","Month")),
+  "Coordinate quality"=coordinate_quality,"Location summary"=location_summary,"Cleaning quality"=cleaning_quality)
+ui <- page_navbar(title=NULL,fillable=FALSE,id="navigation",window_title=tr("app_title"),
+  theme=bs_theme(version=5,bg="#F7F7F5",fg="#252525",primary="#276EF1",base_font="system-ui"),
+  navbar_options=navbar_options(bg="#111111",theme="dark",collapsible=TRUE),
+  header=tags$head(tags$link(rel="stylesheet",href=paste0("dashboard.css?v=",unname(tools::md5sum(file.path(project_root,"app/www/dashboard.css")))))),
+  nav_panel(label("nav_overview"),value="overview",div(class="page",
+    heading("app_title","app_subtitle"),textOutput("ov_metadata",container=function(...) p(class="metadata",...)),
+    uiOutput("ov_kpis"),uiOutput("ov_secondary"),section_title("01","section_activity"),
+    div(class="editorial-grid",chart_card("daily_trend","ov_daily",300),uiOutput("ov_insights")),
+    section_title("02","section_temporal"),pair(chart_card("hourly_profile","ov_hour"),chart_card("weekly_profile","ov_weekday")),
+    section_title("03","section_comparison"),pair(chart_card("monthly_profile","ov_month"),chart_card("daytype_profile","ov_daytype")))),
+  nav_panel(label("nav_demand"),value="demand",div(class="page",heading("nav_demand","demand_subtitle"),
+    filter_panel(dateRangeInput("ta_dates",label("Date range"),start=min(calendar$Date),end=max(calendar$Date),min=min(calendar$Date),max=max(calendar$Date),language="vi",format="dd/mm/yyyy",separator="\u2014"),
+      choice("ta_month","Month",month_levels),choice("ta_daytype","DayType",c("Weekday","Weekend")),choice("ta_weekday","Weekday",weekday_levels),choice("ta_hour","Hour",0:23),choice("ta_base","Base",bases),reset_button("ta_reset")),
+    uiOutput("ta_kpis"),p(class="context",textOutput("ta_context")),
+    pair(chart_card("hourly_profile","ta_hour_plot"),chart_card("hour_weekday","ta_heatmap")),chart_card("eligible_daily","ta_daily",280),
+    pair(chart_card("monthly_profile","ta_month_plot"),chart_card("weekly_profile","ta_weekday_plot")),table_section("filtered_table","ta_table","ta_download","download_filtered"))),
+  nav_panel(label("nav_geo"),value="geo",div(class="page",heading("nav_geo","geo_subtitle"),
+    filter_panel(choice("geo_month","Month",month_levels),choice("geo_base","Base",bases),numericInput("geo_top_n",label("Top N cells"),min=1,max=nrow(distinct(geo_cube,Lat_Grid,Lon_Grid)),value=20,step=1),reset_button("geo_reset")),
+    uiOutput("geo_kpis"),p(class="context",label("geo_note")),div(class="editorial-grid geography-grid",
+      div(class="chart-frame",h4(label("map_title")),leafletOutput("geo_map",height="520px")),chart_card("hotspots","geo_rank",520)),
+    table_section("geo_table","geo_table","geo_download","download_cells"))),
+  nav_panel(label("nav_base"),value="base",div(class="page",heading("nav_base","base_subtitle"),
+    filter_panel(choice("ba_base","Base",bases),choice("ba_month","Month",month_levels),choice("ba_weekday","Weekday",weekday_levels),choice("ba_daytype","DayType",c("Weekday","Weekend")),reset_button("ba_reset")),
+    uiOutput("ba_kpis"),p(class="context",label("base_note")),div(class="editorial-grid",chart_card("base_rank_title","ba_rank_plot",340),chart_card("base_share_title","ba_share",340)),
+    pair(chart_card("base_month","ba_month_plot"),chart_card("base_weekday","ba_weekday_plot")))),
+  nav_panel(label("nav_prediction"),value="model",div(class="page",heading("nav_prediction","prediction_subtitle"),
+    if(model_available) tagList(h3(label("model_comparison")),uiOutput("model_kpis"),p(class="model-conclusion",textOutput("model_comparison")),
+      chart_card("actual_predicted","model_actual",330),
+      div(class="prose",h3(label("experiment_design")),p(label("model_design")),p(textOutput("model_period")),p(label("model_protocol"))),
+      pair(chart_card("residual_title","model_residual"),chart_card("importance_title","model_importance")),table_section("model_comparison","model_table")) else p(label("model_missing")),
+    div(class="prose",h3(label("limitations")),p(label("model_limitations"))))),
+  nav_panel(label("nav_explorer"),value="explorer",div(class="page",heading("nav_explorer","explorer_subtitle"),
+    filter_panel(selectInput("de_dataset",label("Dataset"),localized_choices(names(explorer),all=FALSE),selectize=FALSE),downloadButton("de_download",label("download_rows"))),
+    p(class="context",textOutput("de_description")),DTOutput("de_table"))),
+  nav_panel(label("nav_method"),value="method",div(class="page methodology",heading("nav_method","method_subtitle"),
+    section_title("01","method_dataset"),p(label("method_dataset_text")),
+    section_title("02","method_cleaning"),p(label("method_cleaning_text")),p(label("method_duplicates")),
+    pair(table_section("Cleaning quality","quality_clean"),table_section("Coordinate quality","quality_coord")),
+    section_title("03","method_temporal"),p(label("method_temporal_text")),p(label("method_time_text")),
+    section_title("04","method_geo"),p(label("method_geo_text")),p(label("method_grid_text")),DTOutput("quality_location"),
+    section_title("05","method_prediction"),p(label("model_design")),p(label("model_protocol")),
+    section_title("06","limitations"),p(label("method_limits_text")),p(label("model_limitations")))),
+  nav_spacer(),nav_item(div(class="language-switch",radioButtons("language",NULL,choices=c("VI"="vi","EN"="en"),selected="vi",inline=TRUE))),
+  footer=tags$script(src="language.js"))
+server <- function(input,output,session) {
+  lang <- reactive(if(is.null(input$language)) "vi" else input$language)
+  t <- function(key,...) tr(key,lang(),...)
+  number <- function(x,digits=0) fmt_number(x,lang(),digits)
+  percent <- function(x,digits=2) fmt_percent(x,lang(),digits)
+  peak <- function(df,dimension) {
+    value <- peak_label(df,dimension)
+    if(value=="No matching trips") return(t("no_trips"))
+    if(dimension=="Date") return(fmt_date(value,lang()))
+    display_values(value,lang(),dimension)
   }
-}
-
-library(shiny)
-library(bslib)
-library(dplyr)
-library(ggplot2)
-library(scales)
-library(leaflet)
-library(DT)
-library(readr)
-library(tidyr)
-
-# ==========================================
-# DATA LOADING — load once at startup
-# ==========================================
-
-results_dir <- file.path("..", "Output", "results")
-
-safe_read <- function(filename) {
-  path <- file.path(results_dir, filename)
-  if (!file.exists(path)) {
-    warning(paste("Data file not found:", path,
-                  "\nRun Rscript Main.R from the project root first."))
-    return(NULL)
-  }
-  readr::read_csv(path, show_col_types = FALSE)
-}
-
-# uber_clean is NOT loaded — use only pre-computed aggregates for performance
-# 4.5M rows would make the Shiny app very slow
-uber_clean        <- NULL  # placeholder; actual filtering uses aggregate tables
-trips_by_hour     <- safe_read("trips_by_hour.csv")
-trips_by_month    <- safe_read("trips_by_month.csv")
-trips_by_weekday  <- safe_read("trips_by_weekday.csv")
-trips_by_base     <- safe_read("trips_by_base.csv")
-trips_by_daytype  <- safe_read("trips_by_day_type.csv")
-trips_by_date     <- safe_read("trips_by_date.csv")
-trips_hr_daytype  <- safe_read("trips_by_hour_daytype.csv")
-trips_hr_weekday  <- safe_read("trips_by_hour_weekday.csv")
-trips_base_month  <- safe_read("trips_by_base_month.csv")
-trips_base_wkday  <- safe_read("trips_by_base_weekday.csv")
-avg_by_daytype    <- safe_read("avg_by_daytype.csv")
-location_grid     <- safe_read("location_grid_counts.csv")
-top20_hotspots    <- safe_read("top20_hotspots.csv")
-insights_df       <- safe_read("insights.csv")
-
-# Apply factor levels
-month_levels   <- c("Apr", "May", "Jun", "Jul", "Aug", "Sep")
-weekday_levels <- c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
-apply_factors <- function(df) {
-  if (is.null(df)) return(NULL)
-  if ("Month"   %in% names(df)) df$Month   <- factor(df$Month,   levels = month_levels)
-  if ("Weekday" %in% names(df)) df$Weekday <- factor(df$Weekday, levels = weekday_levels)
-  df
-}
-
-trips_by_month   <- apply_factors(trips_by_month)
-trips_by_weekday <- apply_factors(trips_by_weekday)
-trips_hr_weekday <- apply_factors(trips_hr_weekday)
-trips_base_month <- apply_factors(trips_base_month)
-trips_base_wkday <- apply_factors(trips_base_wkday)
-
-if (!is.null(uber_clean)) {
-  uber_clean$Month   <- factor(uber_clean$Month,   levels = month_levels)
-  uber_clean$Weekday <- factor(uber_clean$Weekday, levels = weekday_levels)
-}
-
-# ---- Helper: get insight value ----
-get_insight <- function(metric) {
-  if (is.null(insights_df)) return("N/A")
-  row <- insights_df[insights_df$Metric == metric, ]
-  if (nrow(row) == 0) return("N/A")
-  as.character(row$Value[1])
-}
-
-# ---- Computed KPIs ----
-total_trips     <- if (!is.null(trips_by_hour)) sum(trips_by_hour$Total_Trips) else 0
-avg_trips_day   <- if (!is.null(trips_by_date))
-                     round(mean(trips_by_date$Total_Trips), 0) else 0
-peak_hour_val   <- get_insight("Peak Hour")
-peak_month_val  <- get_insight("Peak Month")
-top_base_val    <- get_insight("Top Base")
-nyc_pct_val     <- get_insight("Trips inside NYC area (%)")
-
-# ---- Uber brand colors ----
-uber_palette <- c("#276EF1", "#09B374", "#FF6937", "#FFCD00", "#8C1932", "#9B51E0", "#000000")
-
-# ---- Common ggplot theme ----
-theme_uber_dash <- function() {
-  theme_minimal(base_size = 12) +
-    theme(
-      plot.title      = element_text(face = "bold", size = 13),
-      plot.subtitle   = element_text(color = "grey55", size = 10),
-      axis.title      = element_text(face = "bold", size = 11),
-      panel.grid.minor = element_blank(),
-      plot.background = element_rect(fill = "transparent", color = NA)
-    )
-}
-
-# ==========================================
-# UI HELPER FUNCTIONS (must be defined before ui)
-# ==========================================
-
-# Insight card UI element
-insight_card_ui <- function(label, value) {
-  div(class = "insight-card",
-    div(class = "insight-label", label),
-    div(class = "insight-value", value)
-  )
-}
-
-# Icon + text helper for nav tabs
-icon_text <- function(icon_name, text) {
-  tagList(icon(icon_name), text)
-}
-
-# ==========================================
-# UI
-# ==========================================
-
-ui <- page_navbar(
-  title = span(
-    tags$img(src = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Uber_logo_2018.svg/120px-Uber_logo_2018.svg.png",
-             height = "28px", style = "margin-right:10px;"),
-    "NYC Trip Analytics"
-  ),
-  window_title = "Uber NYC Trip Analytics Dashboard",
-  theme = bs_theme(
-    version   = 5,
-    bootswatch = "darkly",
-    primary   = "#276EF1",
-    font_scale = 0.95
-  ),
-  navbar_options = navbar_options(bg = "#1a1a2e"),
-
-  # ---- CSS ----
-  header = tags$head(
-    tags$style(HTML("
-      .kpi-card {
-        background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
-        border: 1px solid #276EF1;
-        border-radius: 12px;
-        padding: 20px;
-        text-align: center;
-        margin-bottom: 12px;
-        transition: transform 0.2s;
-      }
-      .kpi-card:hover { transform: translateY(-3px); }
-      .kpi-value {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #276EF1;
-        display: block;
-      }
-      .kpi-label {
-        font-size: 0.8rem;
-        color: #aaa;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .section-title {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: #fff;
-        border-left: 4px solid #276EF1;
-        padding-left: 10px;
-        margin: 20px 0 12px 0;
-      }
-      .insight-card {
-        background: #16213e;
-        border: 1px solid #276EF1;
-        border-radius: 10px;
-        padding: 15px 20px;
-        margin-bottom: 10px;
-      }
-      .insight-label { color: #aaa; font-size: 0.85rem; }
-      .insight-value { color: #fff; font-weight: 600; font-size: 1.1rem; }
-      body { background-color: #1a1a2e !important; }
-      .navbar-brand img { filter: brightness(0) invert(1); }
-    "))
-  ),
-
-  # ==================================================
-  # TAB 1: OVERVIEW
-  # ==================================================
-  nav_panel(
-    title = icon_text("house", "Overview"),
-
-    layout_columns(
-      col_widths = c(2, 2, 2, 2, 2, 2),
-
-      div(class = "kpi-card",
-        span(class = "kpi-value", scales::comma(total_trips)),
-        span(class = "kpi-label", "Total Trips")),
-
-      div(class = "kpi-card",
-        span(class = "kpi-value", scales::comma(avg_trips_day)),
-        span(class = "kpi-label", "Avg Trips / Day")),
-
-      div(class = "kpi-card",
-        span(class = "kpi-value", paste0(peak_hour_val, ":00")),
-        span(class = "kpi-label", "Peak Hour")),
-
-      div(class = "kpi-card",
-        span(class = "kpi-value", peak_month_val),
-        span(class = "kpi-label", "Peak Month")),
-
-      div(class = "kpi-card",
-        span(class = "kpi-value", top_base_val),
-        span(class = "kpi-label", "Top Base")),
-
-      div(class = "kpi-card",
-        span(class = "kpi-value", paste0(get_insight("Trips inside NYC area (%)"), "%")),
-        span(class = "kpi-label", "NYC Coverage"))
-    ),
-
-    layout_columns(
-      col_widths = c(6, 6),
-      card(full_screen = TRUE, card_header("Trips by Month"),
-           plotOutput("ov_month_chart", height = "260px")),
-      card(full_screen = TRUE, card_header("Trips by Hour"),
-           plotOutput("ov_hour_chart",  height = "260px"))
-    ),
-    layout_columns(
-      col_widths = c(6, 6),
-      card(full_screen = TRUE, card_header("Trips by Weekday"),
-           plotOutput("ov_weekday_chart", height = "260px")),
-      card(full_screen = TRUE, card_header("Trips by Base"),
-           plotOutput("ov_base_chart",    height = "260px"))
-    )
-  ),
-
-  # ==================================================
-  # TAB 2: TIME ANALYSIS
-  # ==================================================
-  nav_panel(
-    title = icon_text("clock", "Time Analysis"),
-
-    layout_sidebar(
-      sidebar = sidebar(
-        width = 220,
-        bg = "#16213e",
-
-        h6("Filters", style = "color:#276EF1; font-weight:700;"),
-
-        selectInput("ta_month", "Month",
-          choices = c("All", month_levels), selected = "All"),
-
-        selectInput("ta_daytype", "Day Type",
-          choices = c("All", "Weekday", "Weekend"), selected = "All"),
-
-        selectInput("ta_weekday", "Weekday",
-          choices = c("All", weekday_levels), selected = "All"),
-
-        selectInput("ta_hour", "Hour",
-          choices = c("All", as.character(0:23)), selected = "All"),
-
-        actionButton("ta_reset", "Reset Filters",
-          class = "btn-outline-primary btn-sm w-100 mt-2")
-      ),
-
-      # KPIs row
-      layout_columns(
-        col_widths = c(4, 4, 4),
-        card(card_header("Filtered Trips"),
-             h3(textOutput("ta_total"), style = "color:#276EF1; font-weight:700; text-align:center;")),
-        card(card_header("Peak Hour"),
-             h3(textOutput("ta_peak_hour"), style = "color:#09B374; font-weight:700; text-align:center;")),
-        card(card_header("Peak Weekday"),
-             h3(textOutput("ta_peak_weekday"), style = "color:#FF6937; font-weight:700; text-align:center;"))
-      ),
-
-      layout_columns(
-        col_widths = c(6, 6),
-        card(full_screen = TRUE, card_header("Trips by Hour"),
-             plotOutput("ta_hour_plot",  height = "260px")),
-        card(full_screen = TRUE, card_header("Trips by Month"),
-             plotOutput("ta_month_plot", height = "260px"))
-      ),
-      layout_columns(
-        col_widths = c(6, 6),
-        card(full_screen = TRUE, card_header("Trips by Weekday"),
-             plotOutput("ta_weekday_plot", height = "260px")),
-        card(full_screen = TRUE, card_header("Hour × DayType"),
-             plotOutput("ta_heatmap",       height = "260px"))
-      ),
-      card(full_screen = TRUE, card_header("Data Table"),
-           DTOutput("ta_table"))
-    )
-  ),
-
-  # ==================================================
-  # TAB 3: BASE ANALYSIS
-  # ==================================================
-  nav_panel(
-    title = icon_text("building", "Base Analysis"),
-
-    layout_sidebar(
-      sidebar = sidebar(
-        width = 220,
-        bg = "#16213e",
-        h6("Filter", style = "color:#276EF1; font-weight:700;"),
-        selectInput("ba_base", "Select Base",
-          choices = c("All", sort(unique(trips_by_base$Base))),
-          selected = "All")
-      ),
-
-      layout_columns(
-        col_widths = c(3, 3, 3, 3),
-        card(card_header("Total Trips"),
-             h3(textOutput("ba_total"),  style = "color:#276EF1; font-weight:700; text-align:center;")),
-        card(card_header("Share (%)"),
-             h3(textOutput("ba_pct"),    style = "color:#09B374; font-weight:700; text-align:center;")),
-        card(card_header("Rank"),
-             h3(textOutput("ba_rank"),   style = "color:#FF6937; font-weight:700; text-align:center;")),
-        card(card_header("Bases"),
-             h3(textOutput("ba_count"),  style = "color:#FFCD00; font-weight:700; text-align:center;"))
-      ),
-
-      layout_columns(
-        col_widths = c(5, 7),
-        card(full_screen = TRUE, card_header("Trips by Base"),
-             plotOutput("ba_base_plot", height = "320px")),
-        card(full_screen = TRUE, card_header("Trips by Month"),
-             plotOutput("ba_month_plot", height = "320px"))
-      ),
-      card(full_screen = TRUE, card_header("Trips by Weekday"),
-           plotOutput("ba_weekday_plot", height = "280px"))
-    )
-  ),
-
-  # ==================================================
-  # TAB 4: GEOGRAPHIC ANALYSIS
-  # ==================================================
-  nav_panel(
-    title = icon_text("map", "Geographic"),
-
-    layout_sidebar(
-      sidebar = sidebar(
-        width = 220,
-        bg = "#16213e",
-        h6("Filters", style = "color:#276EF1; font-weight:700;"),
-        selectInput("geo_month", "Month",
-          choices = c("All", month_levels), selected = "All"),
-        selectInput("geo_base", "Base",
-          choices = c("All", sort(unique(trips_by_base$Base))),
-          selected = "All"),
-        sliderInput("geo_top_n", "Show Top N Grid Cells",
-          min = 100, max = 5000, value = 1000, step = 100),
-        p("Map shows aggregated grid cells (~1km²). Circle size = trip count.",
-          style = "color:#aaa; font-size:0.8rem;")
-      ),
-      card(
-        full_screen = TRUE,
-        card_header("NYC Pickup Density Map"),
-        leafletOutput("geo_map", height = "600px")
-      )
-    )
-  ),
-
-  # ==================================================
-  # TAB 5: HOTSPOTS
-  # ==================================================
-  nav_panel(
-    title = icon_text("fire", "Hotspots"),
-
-    layout_columns(
-      col_widths = c(5, 7),
-
-      card(full_screen = TRUE, card_header("Top 20 Hotspot Locations"),
-           leafletOutput("hs_map", height = "480px")),
-
-      tagList(
-        card(full_screen = TRUE, card_header("Top 20 Hotspots Chart"),
-             plotOutput("hs_chart", height = "280px")),
-        card(full_screen = TRUE, card_header("Hotspot Table"),
-             DTOutput("hs_table"))
-      )
-    )
-  ),
-
-  # ==================================================
-  # TAB 6: DATA EXPLORER
-  # ==================================================
-  nav_panel(
-    title = icon_text("table", "Data Explorer"),
-
-    layout_sidebar(
-      sidebar = sidebar(
-        width = 240,
-        bg = "#16213e",
-        h6("Data Options", style = "color:#276EF1; font-weight:700;"),
-        selectInput("de_dataset", "Dataset",
-          choices = c(
-            "Trips by Hour"    = "hour",
-            "Trips by Month"   = "month",
-            "Trips by Weekday" = "weekday",
-            "Trips by Base"    = "base",
-            "Trips by Day"     = "day_type",
-            "Daily Trips"      = "date",
-            "Base × Month"     = "base_month",
-            "Top 20 Hotspots"  = "hotspot",
-            "Insights Summary" = "insights"
-          ),
-          selected = "hour"
-        ),
-        p("Use the search and column filters in the table to explore the data.",
-          style = "color:#aaa; font-size:0.8rem;")
-      ),
-      card(full_screen = TRUE,
-           card_header(textOutput("de_title")),
-           DTOutput("de_table", height = "550px"))
-    )
-  ),
-
-  # ==================================================
-  # TAB 7: INSIGHTS
-  # ==================================================
-  nav_panel(
-    title = icon_text("lightbulb", "Insights"),
-
-    div(style = "max-width: 960px; margin: auto; padding: 20px;",
-
-      h4("Key Insights — Uber NYC 2014",
-         style = "color:#276EF1; font-weight:700; margin-bottom:24px;"),
-
-      layout_columns(
-        col_widths = c(4, 4, 4),
-
-        insight_card_ui("Total Trips",      scales::comma(total_trips)),
-        insight_card_ui("Avg Trips / Day",  scales::comma(avg_trips_day)),
-        insight_card_ui("Peak Hour",        paste0(get_insight("Peak Hour"), ":00 (", scales::comma(as.numeric(get_insight("Peak Hour Trips"))), " trips)"))
-      ),
-
-      layout_columns(
-        col_widths = c(4, 4, 4),
-        insight_card_ui("Peak Month",    paste0(get_insight("Peak Month"), " (", scales::comma(as.numeric(get_insight("Peak Month Trips"))), " trips)")),
-        insight_card_ui("Monthly Growth", paste0(get_insight("Monthly Growth Apr to Sep (%)"), "% (Apr → Sep)")),
-        insight_card_ui("Peak Weekday",  paste0(get_insight("Peak Weekday"), " (", scales::comma(as.numeric(get_insight("Peak Weekday Trips"))), " trips)"))
-      ),
-
-      layout_columns(
-        col_widths = c(4, 4, 4),
-        insight_card_ui("Weekday Trips", paste0(scales::comma(as.numeric(get_insight("Weekday Total Trips"))), " (", get_insight("Weekday Share (%)"), "%)")),
-        insight_card_ui("Weekend Trips", paste0(scales::comma(as.numeric(get_insight("Weekend Total Trips"))), " (", get_insight("Weekend Share (%)"), "%)")),
-        insight_card_ui("Weekday vs Weekend", paste0("+", get_insight("Weekday vs Weekend Avg Pct Higher"), "% avg/day higher on weekdays"))
-      ),
-
-      layout_columns(
-        col_widths = c(4, 4, 4),
-        insight_card_ui("Top Base",    paste0(get_insight("Top Base"), " — ", scales::comma(as.numeric(get_insight("Top Base Trips"))), " trips (", get_insight("Top Base Share (%)"), "%)")),
-        insight_card_ui("Lowest Base", paste0(get_insight("Lowest Base"), " — ", scales::comma(as.numeric(get_insight("Lowest Base Trips"))), " trips")),
-        insight_card_ui("Top Hotspot", paste0("Lat ", get_insight("Top Hotspot Latitude"), ", Lon ", get_insight("Top Hotspot Longitude"), " — ", scales::comma(as.numeric(get_insight("Top Hotspot Trips"))), " trips"))
-      ),
-
-      hr(style = "border-color:#276EF1;"),
-      p("All values computed dynamically from the dataset. No values are hard-coded.",
-        style = "color:#aaa; font-style:italic; font-size:0.85rem;")
-    )
-  ),
-
-  # ==================================================
-  # TAB 8: ABOUT
-  # ==================================================
-  nav_panel(
-    title = icon_text("info-circle", "About"),
-
-    div(style = "max-width: 800px; margin: auto; padding: 30px;",
-
-      h3("Uber NYC Trip Analytics Dashboard",
-         style = "color:#276EF1; font-weight:700;"),
-
-      p("An end-to-end data analysis pipeline and interactive dashboard for Uber pickups
-        in New York City from April to September 2014."),
-
-      hr(style = "border-color:#276EF1;"),
-
-      h5("Dataset"),
-      tags$ul(
-        tags$li("6 monthly CSV files: April – September 2014"),
-        tags$li(paste0("Total records: ", scales::comma(total_trips))),
-        tags$li("Columns: Date/Time, Lat, Lon, Base"),
-        tags$li("Source: FiveThirtyEight / Kaggle Uber NYC dataset")
-      ),
-
-      h5("Pipeline"),
-      tags$ol(
-        tags$li("00_setup.R — Package installation"),
-        tags$li("01_data_cleaning.R — Load, validate, parse, export uber_clean.csv"),
-        tags$li("02_time_analysis.R — Temporal aggregations"),
-        tags$li("03_base_analysis.R — Base-level analysis"),
-        tags$li("03_location_analysis.R — Geographic grid & hotspots"),
-        tags$li("04_visualization.R — Static charts (Output/figures/)"),
-        tags$li("05_insight_dashboard.R — Key metrics & insights")
-      ),
-
-      h5("Tech Stack"),
-      tags$ul(
-        tags$li("R + Shiny + bslib (dashboard)"),
-        tags$li("dplyr + tidyr + readr (data wrangling)"),
-        tags$li("ggplot2 + scales (visualization)"),
-        tags$li("leaflet (interactive maps)"),
-        tags$li("DT (interactive data tables)")
-      ),
-
-      h5("Usage"),
-      tags$code("Rscript Main.R"),
-      tags$br(),
-      tags$code('shiny::runApp("app")')
-    )
-  )
-)
-
-# (icon_text and insight_card_ui are defined above the ui block)
-
-# ==========================================
-# SERVER
-# ==========================================
-
-server <- function(input, output, session) {
-
-  # ----------------------------------------
-  # OVERVIEW CHARTS (static — no filters)
-  # ----------------------------------------
-
-  output$ov_month_chart <- renderPlot({
-    req(!is.null(trips_by_month))
-    ggplot(trips_by_month, aes(x = Month, y = Total_Trips, fill = Month)) +
-      geom_col(show.legend = FALSE) +
-      scale_fill_manual(values = rep(uber_palette, length.out = 6)) +
-      scale_y_continuous(labels = comma) +
-      labs(x = NULL, y = "Trips") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$ov_hour_chart <- renderPlot({
-    req(!is.null(trips_by_hour))
-    ggplot(trips_by_hour, aes(x = Hour, y = Total_Trips)) +
-      geom_col(fill = "#276EF1", alpha = 0.85) +
-      scale_x_continuous(breaks = seq(0, 23, 4)) +
-      scale_y_continuous(labels = comma) +
-      labs(x = "Hour", y = "Trips") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$ov_weekday_chart <- renderPlot({
-    req(!is.null(trips_by_weekday))
-    ggplot(trips_by_weekday, aes(x = Weekday, y = Total_Trips, fill = Weekday)) +
-      geom_col(show.legend = FALSE) +
-      scale_fill_manual(values = rep(uber_palette, length.out = 7)) +
-      scale_y_continuous(labels = comma) +
-      labs(x = NULL, y = "Trips") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$ov_base_chart <- renderPlot({
-    req(!is.null(trips_by_base))
-    ggplot(trips_by_base, aes(x = reorder(Base, Total_Trips), y = Total_Trips, fill = Base)) +
-      geom_col(show.legend = FALSE) +
-      coord_flip() +
-      scale_fill_manual(values = rep(uber_palette, length.out = nrow(trips_by_base))) +
-      scale_y_continuous(labels = comma) +
-      labs(x = NULL, y = "Trips") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  # ----------------------------------------
-  # TIME ANALYSIS — filtered reactive
-  # ----------------------------------------
-
-  # Time Analysis uses pre-computed aggregate tables for performance
-  # (avoids loading 4.5M row uber_clean.csv into memory per reactive)
-
-  # Derive filtered hour-level summary from trips_by_hour_daytype and trips_hr_weekday
-  ta_hour_filtered <- reactive({
-    req(!is.null(trips_by_hour))
-    df <- trips_by_hour
-    if (input$ta_hour != "All") {
-      df <- df %>% filter(Hour == as.integer(input$ta_hour))
-    }
-    df
-  })
-
-  ta_month_filtered <- reactive({
-    req(!is.null(trips_by_month))
-    df <- trips_by_month
-    if (input$ta_month != "All") {
-      df <- df %>% filter(as.character(Month) == input$ta_month)
-    }
-    df
-  })
-
-  ta_weekday_filtered <- reactive({
-    req(!is.null(trips_by_weekday))
-    df <- trips_by_weekday
-    if (input$ta_weekday != "All") {
-      df <- df %>% filter(as.character(Weekday) == input$ta_weekday)
-    }
-    if (input$ta_daytype != "All") {
-      wkday_set <- if (input$ta_daytype == "Weekday") weekday_levels[1:5] else weekday_levels[6:7]
-      df <- df %>% filter(as.character(Weekday) %in% wkday_set)
-    }
-    df
-  })
-
-  ta_heatmap_filtered <- reactive({
-    req(!is.null(trips_hr_daytype))
-    df <- trips_hr_daytype
-    if (input$ta_daytype != "All") df <- df %>% filter(DayType == input$ta_daytype)
-    if (input$ta_hour    != "All") df <- df %>% filter(Hour == as.integer(input$ta_hour))
-    df
-  })
-
-  # Approximate filtered total from month/weekday/hour combos
-  ta_total_trips <- reactive({
-    # Use trips_by_hour as base denominator; apply rough filters
-    df <- trips_by_hour
-    if (input$ta_hour != "All") {
-      df <- df %>% filter(Hour == as.integer(input$ta_hour))
-    }
-    # For month filter, scale proportionally
-    if (input$ta_month != "All" && !is.null(trips_by_month)) {
-      m_row <- trips_by_month %>% filter(as.character(Month) == input$ta_month)
-      total_m <- if (nrow(m_row) > 0) m_row$Total_Trips[1] else sum(df$Total_Trips)
-      if (input$ta_hour == "All") return(total_m)
-      # Scale hour trips by month fraction
-      month_frac <- total_m / sum(trips_by_month$Total_Trips)
-      return(round(sum(df$Total_Trips) * month_frac))
-    }
-    sum(df$Total_Trips)
-  })
-
-  observeEvent(input$ta_reset, {
-    updateSelectInput(session, "ta_month",   selected = "All")
-    updateSelectInput(session, "ta_daytype", selected = "All")
-    updateSelectInput(session, "ta_weekday", selected = "All")
-    updateSelectInput(session, "ta_hour",    selected = "All")
-  })
-
-  output$ta_total <- renderText({
-    scales::comma(ta_total_trips())
-  })
-
-  output$ta_peak_hour <- renderText({
-    df <- ta_hour_filtered()
-    if (is.null(df) || nrow(df) == 0) return("—")
-    h <- df %>% slice_max(Total_Trips, n = 1, with_ties = FALSE)
-    paste0(h$Hour, ":00")
-  })
-
-  output$ta_peak_weekday <- renderText({
-    df <- ta_weekday_filtered()
-    if (is.null(df) || nrow(df) == 0) return("—")
-    w <- df %>% slice_max(Total_Trips, n = 1, with_ties = FALSE)
-    as.character(w$Weekday)
-  })
-
-  output$ta_hour_plot <- renderPlot({
-    df <- ta_hour_filtered()
-    req(nrow(df) > 0)
-    ggplot(df, aes(x = Hour, y = Total_Trips)) +
-      geom_col(fill = "#276EF1", alpha = 0.85) +
-      scale_x_continuous(breaks = seq(0, 23, 4)) +
-      scale_y_continuous(labels = comma) +
-      labs(x = "Hour", y = "Trips", title = "Trips by Hour") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$ta_month_plot <- renderPlot({
-    df <- ta_month_filtered()
-    req(nrow(df) > 0)
-    ggplot(df, aes(x = Month, y = Total_Trips, fill = Month)) +
-      geom_col(show.legend = FALSE) +
-      scale_fill_manual(values = rep(uber_palette, length.out = nrow(df))) +
-      scale_y_continuous(labels = comma) +
-      labs(x = NULL, y = "Trips", title = "Trips by Month") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$ta_weekday_plot <- renderPlot({
-    df <- ta_weekday_filtered()
-    req(nrow(df) > 0)
-    ggplot(df, aes(x = Weekday, y = Total_Trips, fill = Weekday)) +
-      geom_col(show.legend = FALSE) +
-      scale_fill_manual(values = rep(uber_palette, length.out = nrow(df))) +
-      scale_y_continuous(labels = comma) +
-      labs(x = NULL, y = "Trips", title = "Trips by Weekday") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$ta_heatmap <- renderPlot({
-    df <- ta_heatmap_filtered()
-    req(nrow(df) > 0)
-    ggplot(df, aes(x = Hour, y = DayType, fill = Total_Trips)) +
-      geom_tile(color = "white") +
-      scale_x_continuous(breaks = seq(0, 23, 4)) +
-      scale_fill_gradient(low = "#E3F0FF", high = "#276EF1", labels = comma) +
-      labs(x = "Hour", y = NULL, fill = "Trips", title = "Hour × DayType Heatmap") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$ta_table <- renderDT({
-    # Show aggregated summary table combining relevant filters
-    df_h <- trips_by_hour
-    df_m <- trips_by_month
-    df_w <- trips_by_weekday
-    if (input$ta_month   != "All") df_m <- df_m %>% filter(as.character(Month) == input$ta_month)
-    if (input$ta_weekday != "All") df_w <- df_w %>% filter(as.character(Weekday) == input$ta_weekday)
-    if (input$ta_hour    != "All") df_h <- df_h %>% filter(Hour == as.integer(input$ta_hour))
-    combined <- bind_rows(
-      df_h %>% mutate(Dimension = "Hour",    Label = as.character(Hour)),
-      df_m %>% mutate(Dimension = "Month",   Label = as.character(Month)),
-      df_w %>% mutate(Dimension = "Weekday", Label = as.character(Weekday))
-    ) %>% select(Dimension, Label, Total_Trips)
-    datatable(combined,
-      options = list(pageLength = 25, scrollX = TRUE, dom = "lfrtip"),
-      filter = "top", rownames = FALSE,
-      class = "table-dark table-hover"
-    )
-  })
-
-  # ----------------------------------------
-  # BASE ANALYSIS
-  # ----------------------------------------
-
-  ba_base_data <- reactive({
-    if (input$ba_base == "All") return(trips_by_base)
-    trips_by_base %>% filter(Base == input$ba_base)
-  })
-
-  output$ba_total <- renderText({
-    scales::comma(sum(ba_base_data()$Total_Trips))
-  })
-  output$ba_pct <- renderText({
-    if (input$ba_base == "All") {
-      "100%"
-    } else {
-      paste0(round(sum(ba_base_data()$Total_Trips) /
-                   sum(trips_by_base$Total_Trips) * 100, 1), "%")
+  # Updating labels preserves canonical selected values and leaves navigation/date/Top N alone.
+  observeEvent(lang(),{
+    session$sendCustomMessage("dashboard-language",list(lang=lang(),strings=as.list(translations[[lang()]])))
+    definitions <- list(ta_month=month_levels,ta_weekday=weekday_levels,ta_daytype=c("Weekday","Weekend"),ta_hour=0:23,ta_base=bases,
+      geo_month=month_levels,geo_base=bases,ba_month=month_levels,ba_weekday=weekday_levels,ba_daytype=c("Weekday","Weekend"),ba_base=bases,de_dataset=names(explorer))
+    for(id in names(definitions)) {
+      selected <- isolate(input[[id]])
+      if(is.null(selected)) selected <- if(id=="de_dataset") "Time cube" else "All"
+      updateSelectInput(session,id,choices=localized_choices(definitions[[id]],lang(),if(grepl("daytype",id)) "DayType" else NULL,all=id!="de_dataset"),selected=selected)
     }
   })
-  output$ba_rank <- renderText({
-    if (input$ba_base == "All") return("—")
-    r <- trips_by_base %>% filter(Base == input$ba_base) %>% pull(Rank)
-    if (length(r) == 0) "—" else as.character(r[1])
+  output$ov_metadata <- renderText(t("period_metadata",number(sum(time_cube$Total_Trips)),number(nrow(calendar)),number(length(bases))))
+  output$ov_kpis <- renderUI(kpis(
+    kpi(t("total_trips"),number(sum(time_cube$Total_Trips)),t("observed_days",number(nrow(calendar)))),
+    kpi(t("average_day"),number(sum(time_cube$Total_Trips)/nrow(calendar)),t("observed_average")),
+    kpi(t("peak_hour"),peak(time_cube,"Hour"),t("pickup_count",number(max(aggregate_trips(time_cube,"Hour")$Total_Trips)))),
+    kpi(t("top_base"),peak(time_cube,"Base"))))
+  output$ov_secondary <- renderUI(div(class="secondary-metrics",
+    div(span(t("peak_month")),strong(peak(time_cube,"Month"))),div(span(t("peak_weekday")),strong(peak(time_cube,"Weekday"))),
+    div(span(t("busiest_date")),strong(peak(time_cube,"Date"))),div(span(t("coverage")),strong(percent(coverage)))))
+  output$ov_daily <- renderPlotly(chart(aggregate_trips(time_cube,"Date"),"Date","line",lang=lang()))
+  output$ov_hour <- renderPlotly(chart(aggregate_trips(time_cube,"Hour"),"Hour","line",lang=lang()))
+  output$ov_weekday <- renderPlotly(chart(aggregate_trips(time_cube,"Weekday"),"Weekday",lang=lang()))
+  output$ov_month <- renderPlotly(chart(aggregate_trips(time_cube,"Month"),"Month",lang=lang()))
+  daytype_average <- aggregate_trips(time_cube,"DayType") %>% left_join(count(calendar,DayType,name="Days"),by="DayType") %>% mutate(Average_per_day=Total_Trips/Days)
+  output$ov_daytype <- renderPlotly(chart(daytype_average,"DayType",y="Average_per_day",lang=lang()))
+  output$ov_insights <- renderUI({
+    wd <- daytype_average$Average_per_day[daytype_average$DayType=="Weekday"]
+    we <- daytype_average$Average_per_day[daytype_average$DayType=="Weekend"]
+    div(class="editorial-notes",div(class="editorial-note",strong(peak(time_cube,"Hour")),p(t("hour_annotation"))),
+      div(class="editorial-note",strong(peak(time_cube,"Weekday")),p(t("weekday_annotation"))),
+      div(class="editorial-note",strong(paste0("+",percent(100*(wd/we-1),1))),p(t("daytype_annotation")),tags$small(t("insight_daytype",number(wd),number(we),percent(100*(wd/we-1),1)))))
   })
-  output$ba_count <- renderText({
-    nrow(trips_by_base)
+  ta_filtered <- reactive({req(input$ta_dates); filter_cube(time_cube,input$ta_month,input$ta_weekday,input$ta_daytype,input$ta_hour,input$ta_base,input$ta_dates)})
+  ta_calendar <- reactive({req(input$ta_dates); filter_cube(calendar,input$ta_month,input$ta_weekday,input$ta_daytype,dates=input$ta_dates)})
+  ta_daily <- reactive({left_join(select(ta_calendar(),Date),aggregate_trips(ta_filtered(),"Date"),by="Date") %>% mutate(Total_Trips=replace_na(Total_Trips,0)) %>% arrange(Date)})
+  observeEvent(input$ta_reset,{
+    for(id in c("ta_month","ta_weekday","ta_daytype","ta_hour","ta_base")) updateSelectInput(session,id,selected="All")
+    updateDateRangeInput(session,"ta_dates",start=min(calendar$Date),end=max(calendar$Date))
   })
-
-  output$ba_base_plot <- renderPlot({
-    df <- if (input$ba_base == "All") trips_by_base else
-            trips_by_base %>% filter(Base == input$ba_base)
-    ggplot(df, aes(x = reorder(Base, Total_Trips), y = Total_Trips, fill = Base)) +
-      geom_col(show.legend = FALSE) +
-      coord_flip() +
-      scale_fill_manual(values = rep(uber_palette, nrow(df))) +
-      scale_y_continuous(labels = comma) +
-      geom_text(aes(label = paste0(Percentage, "%")),
-                hjust = -0.1, size = 3.5, color = "white") +
-      labs(x = NULL, y = "Trips", title = "Trips by Base") +
-      theme_uber_dash() +
-      scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.15)))
-  }, bg = "transparent")
-
-  output$ba_month_plot <- renderPlot({
-    req(!is.null(trips_base_month))
-    df <- if (input$ba_base == "All") trips_base_month else
-            trips_base_month %>% filter(Base == input$ba_base)
-    ggplot(df, aes(x = Month, y = Total_Trips, color = Base, group = Base)) +
-      geom_line(linewidth = 1.2) +
-      geom_point(size = 2.5) +
-      scale_color_manual(values = rep(uber_palette, length(unique(df$Base)))) +
-      scale_y_continuous(labels = comma) +
-      labs(x = NULL, y = "Trips", title = "Trips by Month",
-           color = "Base") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$ba_weekday_plot <- renderPlot({
-    req(!is.null(trips_base_wkday))
-    df <- if (input$ba_base == "All") trips_base_wkday else
-            trips_base_wkday %>% filter(Base == input$ba_base)
-    ggplot(df, aes(x = Weekday, y = Total_Trips, fill = Base)) +
-      geom_col(position = "dodge") +
-      scale_fill_manual(values = rep(uber_palette, length(unique(df$Base)))) +
-      scale_y_continuous(labels = comma) +
-      labs(x = NULL, y = "Trips", title = "Trips by Weekday") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  # ----------------------------------------
-  # GEOGRAPHIC MAP
-  # ----------------------------------------
-
-  geo_filtered <- reactive({
-    req(!is.null(location_grid))
-    df <- location_grid
-    # Note: location_grid is aggregated — filter by pre-aggregated data only
-    df %>%
-      slice_max(Total_Trips, n = input$geo_top_n, with_ties = FALSE)
-  })
-
+  output$ta_kpis <- renderUI({df <- ta_filtered();days <- nrow(ta_calendar());kpis(
+    kpi(t("filtered_trips"),number(sum(df$Total_Trips)),t("exact_intersection")),
+    kpi(t("average_day"),if(days) number(sum(df$Total_Trips)/days) else t("no_dates"),t("eligible_days",number(days))),
+    kpi(t("peak_hour"),peak(df,"Hour")),kpi(t("peak_day"),peak(df,"Date")),kpi(t("peak_base"),peak(df,"Base")))})
+  output$ta_context <- renderText(if(!nrow(ta_filtered())) t("empty") else t("filtered_rows",number(nrow(ta_filtered()))))
+  output$ta_hour_plot <- renderPlotly(chart(aggregate_trips(ta_filtered(),"Hour"),"Hour","line",lang=lang()))
+  output$ta_month_plot <- renderPlotly(chart(aggregate_trips(ta_filtered(),"Month"),"Month",lang=lang()))
+  output$ta_weekday_plot <- renderPlotly(chart(aggregate_trips(ta_filtered(),"Weekday"),"Weekday",lang=lang()))
+  output$ta_daily <- renderPlotly(chart(ta_daily(),"Date","line",lang=lang()))
+  output$ta_heatmap <- renderPlotly(heat_chart(aggregate_trips(ta_filtered(),c("Hour","Weekday")),"Hour","Weekday",lang()))
+  output$ta_table <- renderDT(table_view(ta_filtered(),lang()))
+  output$ta_download <- downloadHandler(filename=function() "filtered_demand.csv",content=function(file) write_csv(ta_filtered(),file))
+  geo_all <- reactive({aggregate_trips(filter_cube(geo_cube,month=input$geo_month,base=input$geo_base),c("Lat_Grid","Lon_Grid")) %>%
+    arrange(desc(Total_Trips),Lat_Grid,Lon_Grid) %>% mutate(Rank=row_number(),Share=100*Total_Trips/sum(Total_Trips))})
+  geo_filtered <- reactive({req(input$geo_top_n); head(geo_all(),max(1,min(nrow(geo_all()),as.integer(input$geo_top_n))))})
+  observeEvent(input$geo_reset,{updateSelectInput(session,"geo_month",selected="All");updateSelectInput(session,"geo_base",selected="All");updateNumericInput(session,"geo_top_n",value=20)})
+  output$geo_kpis <- renderUI({all <- geo_all();selected <- geo_filtered();total <- sum(all$Total_Trips)
+    kpis(kpi(t("geo_total"),number(total)),kpi(t("active_cells"),number(nrow(all))),kpi(t("displayed_cells"),number(nrow(selected))),kpi(t("displayed_share"),if(total) percent(100*sum(selected$Total_Trips)/total) else t("no_trips")))})
   output$geo_map <- renderLeaflet({
-    df <- geo_filtered()
-    if (is.null(df) || nrow(df) == 0) {
-      return(leaflet() %>% addTiles() %>%
-               setView(-74.00, 40.75, zoom = 11))
-    }
-
-    max_trips <- max(df$Total_Trips, na.rm = TRUE)
-    radius_scaled <- sqrt(df$Total_Trips / max_trips) * 20000
-
-    pal <- colorNumeric(palette = "YlOrRd", domain = df$Total_Trips)
-
-    leaflet(df) %>%
-      addProviderTiles("CartoDB.DarkMatter") %>%
-      setView(-74.00, 40.73, zoom = 11) %>%
-      addCircles(
-        lng    = ~Lon_Grid,
-        lat    = ~Lat_Grid,
-        radius = radius_scaled,
-        color  = ~pal(Total_Trips),
-        fillColor   = ~pal(Total_Trips),
-        fillOpacity = 0.7,
-        weight      = 1,
-        popup = ~paste0(
-          "<b>Location</b><br/>",
-          "Latitude: ", Lat_Grid, "<br/>",
-          "Longitude: ", Lon_Grid, "<br/>",
-          "Trips: ", scales::comma(Total_Trips)
-        )
-      ) %>%
-      addLegend(
-        position = "bottomright",
-        pal      = pal,
-        values   = ~Total_Trips,
-        title    = "Trip Count",
-        labFormat = labelFormat(big.mark = ",")
-      )
+    df <- geo_filtered();l <- lang()
+    map <- leaflet(options=leafletOptions(preferCanvas=FALSE,scrollWheelZoom=FALSE)) %>% addTiles() %>% setView(-73.98,40.75,11)
+    if(!nrow(df)) return(map)
+    labels <- paste0(t("Rank"),": ",number(df$Rank)," \u00b7 ",t("Total_Trips"),": ",number(df$Total_Trips)," \u00b7 ",t("popup_share"),": ",percent(df$Share)," \u00b7 ",t("Latitude"),": ",number(df$Lat_Grid,4)," \u00b7 ",t("Longitude"),": ",number(df$Lon_Grid,4))
+    map <- map %>% addCircleMarkers(lng=df$Lon_Grid,lat=df$Lat_Grid,radius=3+18*sqrt(df$Total_Trips/max(df$Total_Trips)),color="#41413F",fillColor="#41413F",fillOpacity=.45,weight=1,label=labels,popup=labels) %>% addControl(t("map_note"),position="bottomleft")
+    htmlwidgets::onRender(map,sprintf("function(el){el.querySelector('.leaflet-control-zoom-in').title=%s;el.querySelector('.leaflet-control-zoom-out').title=%s;}",jsonlite::toJSON(t("zoom_in"),auto_unbox=TRUE),jsonlite::toJSON(t("zoom_out"),auto_unbox=TRUE)))
   })
-
-  # ----------------------------------------
-  # HOTSPOTS
-  # ----------------------------------------
-
-  output$hs_map <- renderLeaflet({
-    req(!is.null(top20_hotspots))
-    df <- top20_hotspots
-    max_t <- max(df$Trips)
-
-    leaflet(df) %>%
-      addProviderTiles("CartoDB.DarkMatter") %>%
-      setView(-73.98, 40.75, zoom = 12) %>%
-      addCircleMarkers(
-        lng         = ~Longitude,
-        lat         = ~Latitude,
-        radius      = ~sqrt(Trips / max_t) * 28,
-        color       = "#276EF1",
-        fillColor   = "#276EF1",
-        fillOpacity = 0.7,
-        weight      = 2,
-        label       = ~paste0("#", Rank, " — ", scales::comma(Trips), " trips"),
-        popup       = ~paste0(
-          "<b>Rank #", Rank, "</b><br/>",
-          "Latitude: ", Latitude, "<br/>",
-          "Longitude: ", Longitude, "<br/>",
-          "Trips: <b>", scales::comma(Trips), "</b>"
-        )
-      )
+  output$geo_rank <- renderPlotly({df <- head(geo_filtered(),20);df$Cell <- paste0("#",df$Rank);df <- df[nrow(df):1,];chart(df,"Cell",lang=lang(),horizontal=TRUE)})
+  output$geo_table <- renderDT(table_view(geo_filtered(),lang()))
+  output$geo_download <- downloadHandler(filename=function() "filtered_grid_cells.csv",content=function(file) write_csv(geo_filtered(),file))
+  ba_context <- reactive(filter_cube(time_cube,month=input$ba_month,weekday=input$ba_weekday,daytype=input$ba_daytype))
+  ba_filtered <- reactive(filter_cube(ba_context(),base=input$ba_base))
+  ba_ranking <- reactive(aggregate_trips(ba_context(),"Base") %>% arrange(desc(Total_Trips),Base) %>% mutate(Rank=min_rank(desc(Total_Trips)),Share=100*Total_Trips/sum(Total_Trips)))
+  observeEvent(input$ba_reset,{for(id in c("ba_base","ba_month","ba_weekday","ba_daytype")) updateSelectInput(session,id,selected="All")})
+  output$ba_kpis <- renderUI({total <- sum(ba_filtered()$Total_Trips);denominator <- sum(ba_context()$Total_Trips)
+    days <- nrow(filter_cube(calendar,month=input$ba_month,weekday=input$ba_weekday,daytype=input$ba_daytype))
+    ranks <- ba_ranking();rank <- if(input$ba_base=="All") t("all_bases") else if(input$ba_base %in% ranks$Base) number(ranks$Rank[ranks$Base==input$ba_base]) else t("no_trips")
+    kpis(kpi(t("Total_Trips"),number(total)),kpi(t("base_share"),if(denominator) percent(100*total/denominator) else t("no_trips"),t("same_calendar")),kpi(t("Rank"),rank),kpi(t("average_day"),if(days) number(total/days) else t("no_dates"),t("eligible_days",number(days))))})
+  base_context_chart <- function(y) {df <- ba_ranking();df <- df[rev(seq_len(nrow(df))),];chart(df,"Base",y=y,lang=lang(),horizontal=TRUE,colors=ifelse(input$ba_base!="All" & df$Base==input$ba_base,"#276EF1","#3D3D3B"))}
+  output$ba_rank_plot <- renderPlotly(base_context_chart("Total_Trips"))
+  output$ba_share <- renderPlotly(base_context_chart("Share"))
+  output$ba_month_plot <- renderPlotly(heat_chart(aggregate_trips(ba_filtered(),c("Base","Month")),"Month","Base",lang()))
+  output$ba_weekday_plot <- renderPlotly(heat_chart(aggregate_trips(ba_filtered(),c("Base","Weekday")),"Weekday","Base",lang()))
+  if(model_available) {
+    output$model_kpis <- renderUI({
+      best <- which.min(model_metrics$RMSE)
+      tags$table(class="model-summary",tags$thead(tags$tr(lapply(c("Model","MAE","RMSE","R2","MAPE"),function(k) tags$th(t(k))),tags$th())),
+        tags$tbody(lapply(seq_len(nrow(model_metrics)),function(i) tags$tr(tags$td(display_values(model_metrics$Model[i],lang())),tags$td(number(model_metrics$MAE[i],2)),tags$td(number(model_metrics$RMSE[i],2)),tags$td(number(model_metrics$R2[i],3)),tags$td(number(model_metrics$MAPE[i],2)),tags$td(if(i==best) t("best_rmse"))))))
+    })
+    output$model_comparison <- renderText({best <- model_metrics$Model[which.min(model_metrics$RMSE)];if(best=="Seasonal naive (last week)") t("model_baseline_wins") else t("model_result",display_values(best,lang()))})
+    output$model_period <- renderText(t("model_period",fmt_date(model_metrics$Train_Start[1],lang()),fmt_date(model_metrics$Train_End[1],lang()),fmt_date(model_metrics$Test_Start[1],lang()),fmt_date(model_metrics$Test_End[1],lang()),number(nrow(predictions))))
+    output$model_actual <- renderPlotly({
+      times <- as.POSIXct(predictions$Date,tz="UTC")+predictions$Hour*3600
+      p <- plot_ly()
+      for(key in c("Actual","Baseline","Prediction")) p <- add_trace(p,x=times,y=predictions[[key]],type="scatter",mode="lines",name=t(key),line=list(color=c(Actual="#171717",Baseline="#90908C",Prediction="#276EF1")[[key]],width=1.2),text=paste0(fmt_dimension(times,"Time",lang()),"<br>",t(key),": ",number(predictions[[key]])),hovertemplate="%{text}<extra></extra>")
+      p <- plot_style(p,lang(),t("Total_Trips"));idx <- unique(round(seq(1,length(times),length.out=5)));layout(p,xaxis=list(tickvals=times[idx],ticktext=fmt_date(as.Date(times[idx]),lang())))
+    })
+    output$model_residual <- renderPlotly({df <- predictions;df$Time <- as.POSIXct(df$Date,tz="UTC")+df$Hour*3600;chart(df,"Time","line","Residual",lang())})
+    output$model_importance <- renderPlotly(chart(importance,"Feature",y="Importance",lang=lang(),horizontal=TRUE))
+    output$model_table <- renderDT(table_view(model_metrics,lang(),simple=TRUE))
+  }
+  output$de_description <- renderText({req(input$de_dataset);key <- switch(input$de_dataset,"Time cube"="time_description","Geographic cube"="geo_description","aggregate_description");t("rows_description",number(nrow(explorer[[input$de_dataset]])),t(key))})
+  output$de_table <- renderDT({req(input$de_dataset);table_view(explorer[[input$de_dataset]],lang())})
+  output$de_download <- downloadHandler(filename=function() paste0(gsub(" ","_",tolower(input$de_dataset)),".csv"),content=function(file) {
+    df <- explorer[[input$de_dataset]];rows <- input$de_table_rows_all
+    if(!is.null(rows)) df <- df[rows,,drop=FALSE]
+    write_csv(df,file)
   })
-
-  output$hs_chart <- renderPlot({
-    req(!is.null(top20_hotspots))
-    df <- top20_hotspots %>%
-      mutate(Label = paste0("#", Rank, "\n(", round(Latitude, 2), ", ", round(Longitude, 2), ")"))
-    ggplot(df, aes(x = reorder(Label, Trips), y = Trips)) +
-      geom_col(fill = "#276EF1", alpha = 0.85) +
-      coord_flip() +
-      scale_y_continuous(labels = comma) +
-      labs(x = NULL, y = "Trips", title = "Top 20 Pickup Hotspots") +
-      theme_uber_dash()
-  }, bg = "transparent")
-
-  output$hs_table <- renderDT({
-    req(!is.null(top20_hotspots))
-    datatable(top20_hotspots,
-      options  = list(pageLength = 10, scrollX = TRUE, dom = "tip"),
-      rownames = FALSE,
-      class    = "table-dark table-hover"
-    ) %>%
-      formatRound(c("Latitude", "Longitude"), digits = 4) %>%
-      formatCurrency("Trips", currency = "", interval = 3, mark = ",", digits = 0)
-  })
-
-  # ----------------------------------------
-  # DATA EXPLORER
-  # ----------------------------------------
-
-  de_dataset_map <- list(
-    hour      = trips_by_hour,
-    month     = trips_by_month,
-    weekday   = trips_by_weekday,
-    base      = trips_by_base,
-    day_type  = trips_by_daytype,
-    date      = trips_by_date,
-    base_month = trips_base_month,
-    hotspot   = top20_hotspots,
-    insights  = insights_df
-  )
-
-  output$de_title <- renderText({
-    nm <- input$de_dataset
-    titles <- c(
-      hour = "Trips by Hour", month = "Trips by Month",
-      weekday = "Trips by Weekday", base = "Trips by Base",
-      day_type = "Trips by Day Type", date = "Daily Trips",
-      base_month = "Trips by Base × Month", hotspot = "Top 20 Hotspots",
-      insights = "Insights Summary"
-    )
-    titles[nm]
-  })
-
-  output$de_table <- renderDT({
-    df <- de_dataset_map[[input$de_dataset]]
-    if (is.null(df)) {
-      df <- data.frame(Message = "Data not available. Run Main.R first.")
-    }
-    datatable(df,
-      options  = list(
-        pageLength = 25,
-        lengthMenu = c(10, 25, 50, 100),
-        scrollX    = TRUE,
-        dom        = "lfrtip"
-      ),
-      filter   = "top",
-      rownames = FALSE,
-      class    = "table-dark table-hover table-striped"
-    )
-  })
-
-}  # end server
-
-# ==========================================
-# LAUNCH
-# ==========================================
-shinyApp(ui = ui, server = server)
+  output$quality_clean <- renderDT(table_view(cleaning_quality,lang(),simple=TRUE))
+  output$quality_coord <- renderDT(table_view(coordinate_quality,lang(),simple=TRUE))
+  output$quality_location <- renderDT(table_view(location_summary,lang(),simple=TRUE))
+}
+shinyApp(ui,server)
