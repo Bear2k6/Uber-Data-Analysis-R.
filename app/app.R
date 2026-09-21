@@ -4,11 +4,11 @@ options(sass.cache = FALSE)
 if (.Platform$OS.type == "windows") invisible(Sys.setlocale("LC_CTYPE", "English_United States.utf8"))
 project_root <- if (file.exists("Main.R")) normalizePath(".") else normalizePath("..")
 .libPaths(c(file.path(project_root, ".r-library"), .libPaths()))
-required_pkgs <- c("shiny", "bslib", "dplyr", "ggplot2", "scales", "leaflet", "DT", "readr", "tidyr", "plotly")
+required_pkgs <- c("shiny", "bslib", "dplyr", "ggplot2", "scales", "leaflet", "DT", "readr", "tidyr", "plotly", "stringi", "jsonlite")
 missing_pkgs <- required_pkgs[!vapply(required_pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing_pkgs)) stop("Missing packages: ", paste(missing_pkgs, collapse = ", "),
   ". Run Rscript R/00_setup.R from the repository root.")
-invisible(lapply(required_pkgs, library, character.only = TRUE))
+invisible(lapply(setdiff(required_pkgs,c("stringi","jsonlite")), library, character.only = TRUE))
 source(file.path(project_root, "app/helpers.R"), local = TRUE)
 out <- function(...) file.path(project_root, "output", ...)
 time_cube <- read_checked(out("dashboard/dashboard_time_cube.csv"), c("Date","Month","Weekday","DayType","Hour","Base","Total_Trips"))
@@ -31,13 +31,19 @@ calendar <- distinct(time_cube, Date, Month, Weekday, DayType)
 bases <- sort(unique(time_cube$Base))
 source(file.path(project_root,"app/i18n.R"), local=TRUE, encoding="UTF-8")
 source(file.path(project_root,"app/components.R"), local=TRUE, encoding="UTF-8")
-model_paths <- c("model_metrics.csv","predictions.csv","feature_importance.csv")
+model_paths <- c("model_metrics.csv","predictions.csv","feature_importance.csv","model_metadata.csv")
 model_available <- all(file.exists(out("model",model_paths)))
 if(model_available) {
   model_metrics <- read_checked(out("model/model_metrics.csv"),c("Model","MAE","RMSE","MAPE","R2","Train_Start","Train_End","Test_Start","Test_End"))
-  predictions <- read_checked(out("model/predictions.csv"),c("Date","Hour","Actual","Baseline","Prediction","Residual"))
-  importance <- read_checked(out("model/feature_importance.csv"),c("Feature","Importance"))
+  predictions <- read_checked(out("model/predictions.csv"),c("DateTime","Date","Hour","Actual","Baseline","Prediction","Residual","Seasonal_Naive","Regression_Tree","Random_Forest","XGBoost"))
+  importance <- read_checked(out("model/feature_importance.csv"),c("Model","Feature","Importance","Rank"))
+  model_metadata <- read_checked(out("model/model_metadata.csv"),c("Model","Features","Hyperparameters","Target","Seed"))
+  model_series <- c("Seasonal_Naive","Regression_Tree","Random_Forest","XGBoost")
+  importance_models <- c("Regression tree","Random Forest","XGBoost")
+  stopifnot(setequal(model_metrics$Model,c("Seasonal naive (last week)",importance_models)),nrow(predictions)==720)
 }
+source(file.path(project_root,"app/ai_components.R"), local=TRUE, encoding="UTF-8")
+source(file.path(project_root,"app/assistant_ui.R"), local=TRUE, encoding="UTF-8")
 # Explicit allowlist excludes raw/cleaned trips and the pickup-level map sample.
 explorer <- list("Time cube"=time_cube,"Geographic cube"=geo_cube,
   "Hourly totals"=aggregate_trips(time_cube,"Hour"),"Daily totals"=aggregate_trips(time_cube,"Date"),
@@ -61,35 +67,48 @@ ui <- page_navbar(title=NULL,fillable=FALSE,id="navigation",window_title=tr("app
     pair(chart_card("hourly_profile","ta_hour_plot"),chart_card("hour_weekday","ta_heatmap")),chart_card("eligible_daily","ta_daily",280),
     pair(chart_card("monthly_profile","ta_month_plot"),chart_card("weekly_profile","ta_weekday_plot")),table_section("filtered_table","ta_table","ta_download","download_filtered"))),
   nav_panel(label("nav_geo"),value="geo",div(class="page",heading("nav_geo","geo_subtitle"),
-    filter_panel(choice("geo_month","Month",month_levels),choice("geo_base","Base",bases),numericInput("geo_top_n",label("Top N cells"),min=1,max=nrow(distinct(geo_cube,Lat_Grid,Lon_Grid)),value=20,step=1),reset_button("geo_reset")),
-    uiOutput("geo_kpis"),p(class="context",label("geo_note")),div(class="editorial-grid geography-grid",
+    filter_panel(selectInput("geo_mode",label("map_mode"),localized_choices(c("Grid Density","AI Clusters"),all=FALSE),selectize=FALSE),choice("geo_month","Month",month_levels),choice("geo_base","Base",bases),conditionalPanel("input.geo_mode === 'Grid Density'",numericInput("geo_top_n",label("Top N cells"),min=1,max=nrow(distinct(geo_cube,Lat_Grid,Lon_Grid)),value=20,step=1)),reset_button("geo_reset")),
+    conditionalPanel("input.geo_mode === 'Grid Density'",uiOutput("geo_kpis"),p(class="context",label("geo_note")),div(class="editorial-grid geography-grid",
       div(class="chart-frame",h4(label("map_title")),leafletOutput("geo_map",height="520px")),chart_card("hotspots","geo_rank",520)),
-    table_section("geo_table","geo_table","geo_download","download_cells"))),
+    table_section("geo_table","geo_table","geo_download","download_cells")),
+    conditionalPanel("input.geo_mode === 'AI Clusters'",cluster_panel()))),
   nav_panel(label("nav_base"),value="base",div(class="page",heading("nav_base","base_subtitle"),
     filter_panel(choice("ba_base","Base",bases),choice("ba_month","Month",month_levels),choice("ba_weekday","Weekday",weekday_levels),choice("ba_daytype","DayType",c("Weekday","Weekend")),reset_button("ba_reset")),
     uiOutput("ba_kpis"),p(class="context",label("base_note")),div(class="editorial-grid",chart_card("base_rank_title","ba_rank_plot",340),chart_card("base_share_title","ba_share",340)),
     pair(chart_card("base_month","ba_month_plot"),chart_card("base_weekday","ba_weekday_plot")))),
   nav_panel(label("nav_prediction"),value="model",div(class="page",heading("nav_prediction","prediction_subtitle"),
-    if(model_available) tagList(h3(label("model_comparison")),uiOutput("model_kpis"),p(class="model-conclusion",textOutput("model_comparison")),
+    if(model_available) tagList(h3(label("model_comparison")),uiOutput("model_kpis"),p(class="model-conclusion",textOutput("model_comparison")),p(class="context",label("metric_guide")),
+      filter_panel(selectInput("prediction_model",label("model_selection"),localized_choices(model_series),selectize=FALSE)),
       chart_card("actual_predicted","model_actual",330),
-      div(class="prose",h3(label("experiment_design")),p(label("model_design")),p(textOutput("model_period")),p(label("model_protocol"))),
-      pair(chart_card("residual_title","model_residual"),chart_card("importance_title","model_importance")),table_section("model_comparison","model_table")) else p(label("model_missing")),
+      div(class="prose",h3(label("experiment_design")),p(label("model_design")),p(label("feature_comparison")),p(textOutput("model_period")),p(label("model_protocol"))),
+      chart_card("residual_title","model_residual"),
+      filter_panel(selectInput("importance_model",label("importance_model"),localized_choices(importance_models,all=FALSE),selectize=FALSE)),
+      p(class="context",label("importance_note")),chart_card("importance_title","model_importance",420),table_section("model_comparison","model_table")) else p(label("model_missing")),
     div(class="prose",h3(label("limitations")),p(label("model_limitations"))))),
+  anomaly_page(),
+  assistant_page(),
   nav_panel(label("nav_explorer"),value="explorer",div(class="page",heading("nav_explorer","explorer_subtitle"),
     filter_panel(selectInput("de_dataset",label("Dataset"),localized_choices(names(explorer),all=FALSE),selectize=FALSE),downloadButton("de_download",label("download_rows"))),
     p(class="context",textOutput("de_description")),DTOutput("de_table"))),
   nav_panel(label("nav_method"),value="method",div(class="page methodology",heading("nav_method","method_subtitle"),
-    section_title("01","method_dataset"),p(label("method_dataset_text")),
-    section_title("02","method_cleaning"),p(label("method_cleaning_text")),p(label("method_duplicates")),
+    section_title("01","method_dataset"),p(label("method_dataset_text")),textOutput("method_counts"),
+    p(tags$a(href="https://github.com/fivethirtyeight/uber-tlc-foil-response",target="_blank",rel="noopener",label("method_source"))),
+    section_title("02","method_cleaning"),p(label("method_cleaning_text")),p(label("method_duplicates")),p(label("method_time_text")),
     pair(table_section("Cleaning quality","quality_clean"),table_section("Coordinate quality","quality_coord")),
-    section_title("03","method_temporal"),p(label("method_temporal_text")),p(label("method_time_text")),
-    section_title("04","method_geo"),p(label("method_geo_text")),p(label("method_grid_text")),DTOutput("quality_location"),
-    section_title("05","method_prediction"),p(label("model_design")),p(label("model_protocol")),
-    section_title("06","limitations"),p(label("method_limits_text")),p(label("model_limitations")))),
+    section_title("03","method_eda"),p(label("method_temporal_text")),p(label("method_base_text")),p(label("method_geo_text")),p(label("method_grid_text")),DTOutput("quality_location"),
+    section_title("04","method_architecture"),p(label("method_architecture_text")),
+    section_title("05","method_prediction"),p(label("model_design")),p(label("feature_comparison")),
+    if(model_available) tagList(p(textOutput("method_model_period")),p(textOutput("method_model_features"))),p(label("model_protocol")),p(label("metric_guide")),
+    section_title("06","nav_anomaly"),p(label("anomaly_meaning")),p(label("anomaly_method")),p(label("anomaly_limits")),
+    section_title("07","method_unsupervised"),p(label("cluster_method")),p(label("cluster_limits")),
+    section_title("08","method_conversation"),p(label("method_conversation_text")),
+    section_title("09","limitations"),p(label("method_limits_text")),p(label("model_limitations")))),
   nav_spacer(),nav_item(div(class="language-switch",radioButtons("language",NULL,choices=c("VI"="vi","EN"="en"),selected="vi",inline=TRUE))),
-  footer=tags$script(src="language.js"))
+  footer=tagList(tags$script(src="language.js"),tags$script(src="assistant.js")))
 server <- function(input,output,session) {
   lang <- reactive(if(is.null(input$language)) "vi" else input$language)
+  ai <- ai_server(input,output,session,lang)
+  data_assistant <- assistant_server(input,output,session,lang)
   t <- function(key,...) tr(key,lang(),...)
   number <- function(x,digits=0) fmt_number(x,lang(),digits)
   percent <- function(x,digits=2) fmt_percent(x,lang(),digits)
@@ -104,12 +123,14 @@ server <- function(input,output,session) {
     session$sendCustomMessage("dashboard-language",list(lang=lang(),strings=as.list(translations[[lang()]])))
     definitions <- list(ta_month=month_levels,ta_weekday=weekday_levels,ta_daytype=c("Weekday","Weekend"),ta_hour=0:23,ta_base=bases,
       geo_month=month_levels,geo_base=bases,ba_month=month_levels,ba_weekday=weekday_levels,ba_daytype=c("Weekday","Weekend"),ba_base=bases,de_dataset=names(explorer))
+    if(model_available) definitions <- c(definitions,list(prediction_model=model_series,importance_model=importance_models))
     for(id in names(definitions)) {
       selected <- isolate(input[[id]])
-      if(is.null(selected)) selected <- if(id=="de_dataset") "Time cube" else "All"
-      updateSelectInput(session,id,choices=localized_choices(definitions[[id]],lang(),if(grepl("daytype",id)) "DayType" else NULL,all=id!="de_dataset"),selected=selected)
+      if(is.null(selected)) selected <- if(id=="de_dataset") "Time cube" else if(id=="importance_model") "Regression tree" else "All"
+      updateSelectInput(session,id,choices=localized_choices(definitions[[id]],lang(),if(grepl("daytype",id)) "DayType" else NULL,all=!id %in% c("de_dataset","importance_model")),selected=selected)
     }
   })
+  output$method_counts <- renderText(t("period_metadata",number(sum(time_cube$Total_Trips)),number(nrow(calendar)),number(length(bases))))
   output$ov_metadata <- renderText(t("period_metadata",number(sum(time_cube$Total_Trips)),number(nrow(calendar)),number(length(bases))))
   output$ov_kpis <- renderUI(kpis(
     kpi(t("total_trips"),number(sum(time_cube$Total_Trips)),t("observed_days",number(nrow(calendar)))),
@@ -165,7 +186,7 @@ server <- function(input,output,session) {
     map <- map %>% addCircleMarkers(lng=df$Lon_Grid,lat=df$Lat_Grid,radius=3+18*sqrt(df$Total_Trips/max(df$Total_Trips)),color="#41413F",fillColor="#41413F",fillOpacity=.45,weight=1,label=labels,popup=labels) %>% addControl(t("map_note"),position="bottomleft")
     htmlwidgets::onRender(map,sprintf("function(el){el.querySelector('.leaflet-control-zoom-in').title=%s;el.querySelector('.leaflet-control-zoom-out').title=%s;}",jsonlite::toJSON(t("zoom_in"),auto_unbox=TRUE),jsonlite::toJSON(t("zoom_out"),auto_unbox=TRUE)))
   })
-  output$geo_rank <- renderPlotly({df <- head(geo_filtered(),20);df$Cell <- paste0("#",df$Rank);df <- df[nrow(df):1,];chart(df,"Cell",lang=lang(),horizontal=TRUE)})
+  output$geo_rank <- renderPlotly({df <- head(geo_filtered(),20);df$Cell <- paste0("#",df$Rank);df <- df[rev(seq_len(nrow(df))),];chart(df,"Cell",lang=lang(),horizontal=TRUE)})
   output$geo_table <- renderDT(table_view(geo_filtered(),lang()))
   output$geo_download <- downloadHandler(filename=function() "filtered_grid_cells.csv",content=function(file) write_csv(geo_filtered(),file))
   ba_context <- reactive(filter_cube(time_cube,month=input$ba_month,weekday=input$ba_weekday,daytype=input$ba_daytype))
@@ -185,19 +206,28 @@ server <- function(input,output,session) {
     output$model_kpis <- renderUI({
       best <- which.min(model_metrics$RMSE)
       tags$table(class="model-summary",tags$thead(tags$tr(lapply(c("Model","MAE","RMSE","R2","MAPE"),function(k) tags$th(t(k))),tags$th())),
-        tags$tbody(lapply(seq_len(nrow(model_metrics)),function(i) tags$tr(tags$td(display_values(model_metrics$Model[i],lang())),tags$td(number(model_metrics$MAE[i],2)),tags$td(number(model_metrics$RMSE[i],2)),tags$td(number(model_metrics$R2[i],3)),tags$td(number(model_metrics$MAPE[i],2)),tags$td(if(i==best) t("best_rmse"))))))
+        tags$tbody(lapply(seq_len(nrow(model_metrics)),function(i) tags$tr(class=if(i==best) "model-best" else NULL,tags$td(display_values(model_metrics$Model[i],lang())),tags$td(number(model_metrics$MAE[i],2)),tags$td(number(model_metrics$RMSE[i],2)),tags$td(number(model_metrics$R2[i],3)),tags$td(number(model_metrics$MAPE[i],2)),tags$td(if(i==best) t("best_rmse"))))))
     })
     output$model_comparison <- renderText({best <- model_metrics$Model[which.min(model_metrics$RMSE)];if(best=="Seasonal naive (last week)") t("model_baseline_wins") else t("model_result",display_values(best,lang()))})
-    output$model_period <- renderText(t("model_period",fmt_date(model_metrics$Train_Start[1],lang()),fmt_date(model_metrics$Train_End[1],lang()),fmt_date(model_metrics$Test_Start[1],lang()),fmt_date(model_metrics$Test_End[1],lang()),number(nrow(predictions))))
+    model_period_text <- reactive(t("model_period",fmt_date(model_metrics$Train_Start[1],lang()),fmt_date(model_metrics$Train_End[1],lang()),fmt_date(model_metrics$Test_Start[1],lang()),fmt_date(model_metrics$Test_End[1],lang()),number(nrow(predictions))))
+    output$model_period <- renderText(model_period_text())
+    output$method_model_period <- renderText(model_period_text())
+    output$method_model_features <- renderText({
+      features <- strsplit(model_metadata$Features[model_metadata$Model=="XGBoost"],"; ",fixed=TRUE)[[1]]
+      paste0(t("Feature"),": ",paste(display_values(features,lang()),collapse="; "),".")
+    })
+    selected_prediction <- reactive({value <- input$prediction_model;if(is.null(value)) value <- "All";if(value=="All") model_series else {req(value %in% model_series);value}})
+    selected_importance <- reactive({value <- input$importance_model;if(is.null(value)) value <- "Regression tree";req(value %in% importance_models);importance[importance$Model==value,]})
     output$model_actual <- renderPlotly({
       times <- as.POSIXct(predictions$Date,tz="UTC")+predictions$Hour*3600
+      colors <- c(Actual="#171717",Seasonal_Naive="#93938F",Regression_Tree="#A3A8AF",Random_Forest="#39766F",XGBoost="#276EF1")
       p <- plot_ly()
-      for(key in c("Actual","Baseline","Prediction")) p <- add_trace(p,x=times,y=predictions[[key]],type="scatter",mode="lines",name=t(key),line=list(color=c(Actual="#171717",Baseline="#90908C",Prediction="#276EF1")[[key]],width=1.2),text=paste0(fmt_dimension(times,"Time",lang()),"<br>",t(key),": ",number(predictions[[key]])),hovertemplate="%{text}<extra></extra>")
+      for(key in c("Actual",selected_prediction())) p <- add_trace(p,x=times,y=predictions[[key]],type="scatter",mode="lines",name=t(key),line=list(color=colors[[key]],width=if(key=="Actual") 1.6 else 1.2),text=paste0(fmt_dimension(times,"Time",lang()),"<br>",t(key),": ",number(predictions[[key]])),hovertemplate="%{text}<extra></extra>")
       p <- plot_style(p,lang(),t("Total_Trips"));idx <- unique(round(seq(1,length(times),length.out=5)));layout(p,xaxis=list(tickvals=times[idx],ticktext=fmt_date(as.Date(times[idx]),lang())))
     })
     output$model_residual <- renderPlotly({df <- predictions;df$Time <- as.POSIXct(df$Date,tz="UTC")+df$Hour*3600;chart(df,"Time","line","Residual",lang())})
-    output$model_importance <- renderPlotly(chart(importance,"Feature",y="Importance",lang=lang(),horizontal=TRUE))
-    output$model_table <- renderDT(table_view(model_metrics,lang(),simple=TRUE))
+    output$model_importance <- renderPlotly(chart(selected_importance()[rev(seq_len(nrow(selected_importance()))),],"Feature",y="Importance",lang=lang(),horizontal=TRUE))
+    output$model_table <- renderDT(table_view(model_metrics,lang(),simple=TRUE) %>% formatRound(c("Runtime_Seconds","Tuning_Seconds","Fit_Seconds","Prediction_Seconds"),2,mark=if(lang()=="vi") "." else ",",dec.mark=if(lang()=="vi") "," else "."))
   }
   output$de_description <- renderText({req(input$de_dataset);key <- switch(input$de_dataset,"Time cube"="time_description","Geographic cube"="geo_description","aggregate_description");t("rows_description",number(nrow(explorer[[input$de_dataset]])),t(key))})
   output$de_table <- renderDT({req(input$de_dataset);table_view(explorer[[input$de_dataset]],lang())})

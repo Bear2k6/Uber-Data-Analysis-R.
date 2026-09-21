@@ -1,6 +1,36 @@
-Feature,Importance
-lag_168,954757145.5408883
-lag_24,628861243.386396
-Hour,472535250.1948847
-DayIndex,172047581.60587528
-Weekday,146275842.29226637
+Model,Feature,Importance,Rank,Raw_Importance,Method
+Regression tree,lag_168,40.20915427696096,1,954757145.5408883,rpart split improvement (including surrogate credit)
+Regression tree,lag_24,26.484199539349977,2,628861243.386396,rpart split improvement (including surrogate credit)
+Regression tree,Hour,19.90060285500609,3,472535250.1948847,rpart split improvement (including surrogate credit)
+Regression tree,DayIndex,7.245704087241529,4,172047581.60587528,rpart split improvement (including surrogate credit)
+Regression tree,Weekday,6.160339241441439,5,146275842.29226637,rpart split improvement (including surrogate credit)
+Random Forest,lag_1,32.126280824250664,1,381048790.307173,ranger impurity decrease
+Random Forest,lag_168,28.51870429547382,2,338259440.37428886,ranger impurity decrease
+Random Forest,lag_24,12.625978858466857,3,149756331.795215,ranger impurity decrease
+Random Forest,rolling_mean_3,8.592482777343697,4,101915163.66160017,ranger impurity decrease
+Random Forest,Hour,8.311939065938828,5,98587643.66499928,ranger impurity decrease
+Random Forest,lag_2,3.4410573067490486,6,40814270.76129554,ranger impurity decrease
+Random Forest,lag_48,2.3442574857963763,7,27805163.13164237,ranger impurity decrease
+Random Forest,rolling_sd_24,0.8897906411533353,8,10553778.362734914,ranger impurity decrease
+Random Forest,rolling_mean_24,0.8834961692523876,9,10479119.832648603,ranger impurity decrease
+Random Forest,Weekday,0.5427231112463797,10,6437221.480554056,ranger impurity decrease
+Random Forest,rolling_mean_168,0.5220918395705042,11,6192514.626449216,ranger impurity decrease
+Random Forest,DayIndex,0.4895480902058354,12,5806514.255123753,ranger impurity decrease
+Random Forest,DayOfMonth,0.3137300404432052,13,3721141.9849030147,ranger impurity decrease
+Random Forest,DayType,0.23220953756801474,14,2754229.905171225,ranger impurity decrease
+Random Forest,Month,0.16570995654104487,15,1965480.4995091476,ranger impurity decrease
+XGBoost,lag_1,64.30240255605176,1,0.6430240255605176,XGBoost gain; weekday dummy gains summed
+XGBoost,lag_168,25.212189720931903,2,0.25212189720931905,XGBoost gain; weekday dummy gains summed
+XGBoost,lag_24,5.17371309182386,3,0.0517371309182386,XGBoost gain; weekday dummy gains summed
+XGBoost,Hour,1.5926262776965676,4,0.015926262776965676,XGBoost gain; weekday dummy gains summed
+XGBoost,rolling_mean_3,0.8325902263649873,5,0.008325902263649872,XGBoost gain; weekday dummy gains summed
+XGBoost,lag_2,0.8019629438869241,6,0.008019629438869242,XGBoost gain; weekday dummy gains summed
+XGBoost,lag_48,0.6066077216670158,7,0.006066077216670158,XGBoost gain; weekday dummy gains summed
+XGBoost,rolling_sd_24,0.27080609860539767,8,0.0027080609860539767,XGBoost gain; weekday dummy gains summed
+XGBoost,DayType,0.2642073305443091,9,0.0026420733054430914,XGBoost gain; weekday dummy gains summed
+XGBoost,rolling_mean_24,0.24527718673666546,10,0.0024527718673666545,XGBoost gain; weekday dummy gains summed
+XGBoost,rolling_mean_168,0.24425288342405516,11,0.0024425288342405514,XGBoost gain; weekday dummy gains summed
+XGBoost,Weekday,0.15670104024132228,12,0.0015670104024132227,XGBoost gain; weekday dummy gains summed
+XGBoost,DayIndex,0.14958909472162296,13,0.0014958909472162297,XGBoost gain; weekday dummy gains summed
+XGBoost,DayOfMonth,0.09285123707699768,14,9.285123707699767e-4,XGBoost gain; weekday dummy gains summed
+XGBoost,Month,0.054222590226605305,15,5.42225902266053e-4,XGBoost gain; weekday dummy gains summed

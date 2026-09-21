@@ -1,0 +1,9 @@
+Model,Candidate,Parameters,Validation_RMSE,Selected,Fit_Start,Fit_End,Validation_Start,Validation_End
+Random Forest,1,num.trees=400; mtry=5; min.node.size=5,95.44289392426887,TRUE,2014-04-08,2014-07-31,2014-08-01,2014-08-31
+Random Forest,2,num.trees=400; mtry=10; min.node.size=5,95.5177879434823,FALSE,2014-04-08,2014-07-31,2014-08-01,2014-08-31
+Random Forest,3,num.trees=400; mtry=5; min.node.size=15,96.49603345141998,FALSE,2014-04-08,2014-07-31,2014-08-01,2014-08-31
+Random Forest,4,num.trees=400; mtry=10; min.node.size=15,95.87793359897225,FALSE,2014-04-08,2014-07-31,2014-08-01,2014-08-31
+XGBoost,1,max_depth=3; min_child_weight=5; eta=0.05; subsample=0.8; colsample_bytree=0.8; nrounds=75,113.92714222223609,FALSE,2014-04-08,2014-07-31,2014-08-01,2014-08-31
+XGBoost,2,max_depth=5; min_child_weight=5; eta=0.05; subsample=0.8; colsample_bytree=0.8; nrounds=74,100.31946281744004,FALSE,2014-04-08,2014-07-31,2014-08-01,2014-08-31
+XGBoost,3,max_depth=3; min_child_weight=15; eta=0.05; subsample=0.8; colsample_bytree=0.8; nrounds=75,112.21878120942122,FALSE,2014-04-08,2014-07-31,2014-08-01,2014-08-31
+XGBoost,4,max_depth=5; min_child_weight=15; eta=0.05; subsample=0.8; colsample_bytree=0.8; nrounds=78,98.0315606635918,TRUE,2014-04-08,2014-07-31,2014-08-01,2014-08-31

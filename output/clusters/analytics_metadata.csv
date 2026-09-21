@@ -1,0 +1,2 @@
+Epsilon_Km,Min_Pickups,Weight,Noise_ID,Grid_Degrees,Origin_Lat,Origin_Lon,Earth_Radius_Km,Distance,Border_Points,Package_Version,Geo_Cube_MD5,Predictions_MD5
+1.5,20000,Total_Trips,0,0.01,40.75,-73.98,6371.0088,Euclidean in local equirectangular kilometre coordinates,TRUE,1.2.6,5d6608da697e922ac13fc9ca55524d2b,a620bfc6189b8f705dd09999ad0b836a

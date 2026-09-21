@@ -56,3 +56,18 @@ rsconnect/
 output/results/uber_clean.csv
 .r-library/
 output/logs/
+
+# Data Assistant secrets and transient debugging
+.env
+.env.*
+!.env.example
+.Renviron.*
+logs/
+
+# Submission archives and temporary editor files
+submission/
+*.tmp
+*.bak
+*~
+.DS_Store
+Thumbs.db

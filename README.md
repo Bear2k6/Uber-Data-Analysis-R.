@@ -1,121 +1,259 @@
-# Uber NYC Demand Intelligence
+# Uber NYC Data Analysis — R + Shiny
 
-An R analysis pipeline and Shiny dashboard for 4,534,327 Uber NYC pickup records from April–September 2014. The existing temporal, dispatch Base and geographic analyses are preserved. The dashboard uses exact compact aggregates, never the 4.5-million-row cleaned file.
+A reproducible university project covering exploratory analysis, hourly forecasting, residual anomaly screening, spatial clustering and a grounded bilingual Data Assistant. The dashboard describes **4,534,327 recorded Uber pickups, April–September 2014**. It is a historical analysis, not a live Uber service.
 
-## Run locally
+## Quick start
 
-Use the directory containing `Main.R` as your working directory (the supplied download has an extra outer folder).
-
-```r
-source("R/00_setup.R")  # one-time dependency setup; installs missing packages
-source("Main.R")       # regenerate all analysis, dashboard and model outputs
-shiny::runApp("app")
-```
-
-Or from a terminal with Rscript on PATH:
+Work in the directory containing `Main.R`. This download contains an extra outer directory; do not run commands from that outer directory.
 
 ```sh
-Rscript R/00_setup.R
-Rscript Main.R
-Rscript -e 'shiny::runApp("app", host="127.0.0.1", port=3838)'
-Rscript tests/verify_dashboard.R
+Rscript --vanilla R/00_setup.R
+Rscript --vanilla Main.R
+Rscript --vanilla tests/run_all_tests.R
+Rscript -e 'shiny::runApp("app", host="127.0.0.1", port=3843, launch.browser=TRUE)'
 ```
 
-Dependencies: ggplot2, dplyr, tidyr, lubridate, ggthemes, scales, readr, shiny, bslib, leaflet, DT, plotly; the model uses the R-recommended rpart package. This workspace has a project-local `.r-library/` (ignored by version control). Both setup and the app also support normally installed R packages. Runtime never installs packages. Missing or invalid required outputs produce an actionable `Rscript Main.R` error.
+Exact PowerShell commands for the current Windows machine:
 
-## Structure and pipeline
+```powershell
+Set-Location 'C:\Users\Admin\Downloads\Uber-Data-Analysis-R.-Shiny-Dashboard\Uber-Data-Analysis-R.-Shiny-Dashboard'
+& 'C:\Program Files\R\R-4.6.1\bin\Rscript.exe' --vanilla R/00_setup.R
+& 'C:\Program Files\R\R-4.6.1\bin\Rscript.exe' --vanilla Main.R
+& 'C:\Program Files\R\R-4.6.1\bin\Rscript.exe' --vanilla tests/run_all_tests.R
+& 'C:\Program Files\R\R-4.6.1\bin\Rscript.exe' -e 'shiny::runApp("app",host="127.0.0.1",port=3843,launch.browser=TRUE)'
+```
+
+In R/RStudio, `source("Main.R", encoding="UTF-8")`, then `shiny::runApp("app")`. If processed outputs already exist, launch Shiny directly. Stop the app before rebuilding outputs and restart afterwards; sessions deliberately cache one consistent startup snapshot.
+
+Setup creates a project-local `.r-library` and installs only missing dependencies from CRAN. It does not pin versions. Dependencies: ggplot2, dplyr, tidyr, lubridate, scales, readr, shiny, bslib, leaflet, DT, plotly, rpart, ranger, xgboost, dbscan, stringi, jsonlite, httr and htmlwidgets. Only setup installs packages. The Shiny app never installs or trains anything. Tested on Windows with R 4.6.1; exact modeling versions are exported in `output/model/model_metadata.csv`. Linux/macOS and clean-machine package installation are not claimed as tested.
+
+## Dataset and provenance
+
+The six monthly files in `data/` correspond to the [FiveThirtyEight Uber TLC FOIL release](https://github.com/fivethirtyeight/uber-tlc-foil-response), obtained from NYC's Taxi & Limousine Commission. This project uses only April–September 2014, not the release's other companies or 2015 data. Local files were retained, not replaced by downloads.
+
+| Column | Meaning |
+|---|---|
+| Date/Time | Supplied pickup date and time |
+| Lat, Lon | Pickup latitude and longitude |
+| Base | TLC base-company code affiliated with the pickup |
+
+The dashboard convention calls these Dispatch Bases; the source does not identify an individual driver or supply a verified trip ID. Counts mean pickup **records**, not deduplicated unique journeys. The project reports and retains **82,581 duplicate rows** because matching four fields is insufficient to establish duplication of a real journey. Missing required values, date parsing failures and invalid geographic ranges are reported in quality outputs; they are all zero in these supplied files. No unsupported imputation of missing fields occurs.
+
+Timestamps preserve supplied wall-clock components. UTC in exported hourly timestamps is a storage convention, not a conversion of New York time. Models complete the hourly grid with zero counts; absence of observations may indicate missing coverage.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  Raw[Six raw monthly CSVs] --> Clean[Validation and cleaning]
+  Clean --> EDA[Temporal / Base / geography EDA]
+  EDA --> Figures[Report figures and insights]
+  Clean --> Marts[Exact time and geographic marts]
+  Marts --> Shiny[Bilingual Shiny dashboard]
+  Marts --> Hourly[Hourly demand and prior-only features]
+  Hourly --> Models[Chronological model fitting and validation]
+  Models --> Evaluation[September predictions and metrics]
+  Evaluation --> Shiny
+  Evaluation --> Anomaly[Prior-calibrated residual screening]
+  Anomaly --> Shiny
+  Marts --> Clusters[Weighted DBSCAN on grid centers]
+  Clusters --> Shiny
+  User[VI / EN question] --> Parser[Allowlisted intent and validated parameters]
+  Parser --> Query[Deterministic R query of startup cache]
+  Query --> Facts[Structured facts / scope / sources]
+  Facts --> Template[Local answer templates]
+  Facts --> Optional[Optional LLM selects vetted lead phrase]
+  Optional --> Template
+  Template --> Answer[Grounded answer]
+```
+
+## Files and pipeline order
 
 ```text
-data/                          Six original monthly CSV files
+Main.R                         Runs stages 00–09 in order
 R/
-  00_setup.R                   Dependency setup
-  01_data_cleaning.R           Validation, parsing, duplicate/missing audit
-  02_time_analysis.R           Original temporal summaries
-  03_base_analysis.R           Original Base summaries
-  04_location_analysis.R       Bounding box, grid, hotspots, quality
-  05_visualization.R           Nine report figures
-  06_insight_dashboard.R       Original exported insight metrics
+  00_setup.R                   Dependencies and output directories
+  01_data_cleaning.R           Six-file input, validation and time features
+  02_time_analysis.R           Hour/date/month/weekday/day-type summaries
+  03_base_analysis.R           Base ranking and calendar comparisons
+  04_location_analysis.R       Coordinate quality, bbox, grid, report sample
+  05_visualization.R           Nine PNG report figures
+  06_insight_dashboard.R       Exported EDA findings
   07_dashboard_marts.R         Exact time and geographic cubes
-  08_demand_model.R            Chronological prediction experiment
+  08_demand_model.R            Four-model experiment
+  09_ai_analytics.R            Anomalies AND weighted DBSCAN
+  model_helpers.R              Features, training and metric functions
+  ai_helpers.R                 Residual scoring and spatial clustering
 app/
-  app.R                        Seven-page Shiny application
-  helpers.R                    Validation, filtering and aggregation helpers
-  i18n.R                       Central VI/EN dictionary and formatters
-  components.R                 Reusable presentation components
-  www/dashboard.css            Editorial layout and responsive tokens
-  www/language.js              In-place language updates
+  app.R                        Nine-page application; cached output loading
+  helpers.R / components.R     Analytical operations / presentation
+  i18n.R                       Shared VI/EN catalogue and formatting
+  ai_components.R              Saved anomaly and cluster UI
+  data_assistant.R             Intent parser, queries, factual templates
+  assistant_provider.R         Optional constrained provider adapter
+  assistant_ui.R               Chat/context/session integration
+  www/                         CSS, language.js, assistant.js
 output/
-  results/                     Existing summaries, cleaning_quality.csv, uber_clean.csv
-  figures/                     Preserved figure filenames
-  dashboard/                   dashboard_time_cube.csv, dashboard_geo_cube.csv
-  model/                       model_metrics.csv, predictions.csv, feature_importance.csv
-report/                        Original report placeholder (supplied file is empty)
-tests/verify_dashboard.R        Raw-data reconciliation and Shiny server tests
-Main.R
+  results/                     Cleaned CSV, EDA and quality summaries
+  dashboard/                   Two exact compact cubes
+  model/                       Predictions, metrics, importance, tuning, metadata
+  anomaly/                     Scored hours and calibration summary
+  clusters/                    Membership, summary, sensitivity and metadata
+  figures/                     Nine report PNGs
+  logs/                        Local execution/audit evidence; excluded from submission
+report/                        Original Word placeholder; currently zero bytes
+tests/                        Six verify suites and master runner
+PROJECT_SUMMARY.md              Vietnamese oral-defense overview
+DEFENSE_QA.md                   Defense questions and concise answers
+DEMO_SCRIPT.md                  5–7 minute Vietnamese demo
 ```
 
-Paths consistently use lowercase `data/`, `output/`, `report/`, `app/`, and uppercase `R/` and `Main.R`. The two formerly numbered 03 scripts now have distinct stage numbers. Run from the repository root on Windows or Linux. Linux needs the usual system libraries for R package installation; no Linux execution was performed in this Windows workspace.
+`output/results/` intentionally retains the existing cleaned-data/EDA layout; files were not duplicated into cosmetic new directories. Stage 09 combines the two AI analytics operations. Stages 01–06 can run individually when their predecessor outputs exist; stage 07 uses the full-cleaned and NYC objects established by earlier stages, so run it through `Main.R`. Stages 08 and 09 also support standalone execution against existing compact inputs. If stage 08 is rerun, rerun stage 09 before restarting Shiny so anomaly lineage stays consistent.
 
-## Dashboard
+Two stage-local `load_result()` definitions serve the standalone visualization and insight scripts. They are not loaded by Shiny. Legacy prediction aliases (`Baseline`, `Prediction`, `Residual`) intentionally remain because old tests and the original-tree residual chart use them.
 
-- **Overview / Tổng quan:** four primary metrics, a secondary summary row, daily trend with editorial annotations, and numbered temporal/comparison sections.
-- **Demand Patterns:** date range, month, day type, weekday, hour and Base intersect on one dataset. Every KPI, chart, heatmap and table uses that selection. Reset and filtered CSV export are included.
-- **Geography / Phân bố địa lý:** exact Month/Base filtering, Top N grid cells, Leaflet markers, ranks, shares, hotspot chart/table and CSV export. Shares use the full geographic selection before Top N.
-- **Base Analysis / Phân tích Base:** calendar filters, Base focus, contextual rank and share, Base/month and Base/weekday heatmaps. Share is within this dataset, not the total ride-hailing market.
-- **Prediction / Dự báo:** both baseline and regression-tree metrics, actual/predicted series, residuals, feature importance and limitations.
-- **Data Explorer:** allowlisted compact aggregates and quality outputs, row counts, search/column filtering, CSV export of matching rows.
-- **Methodology:** actual cleaning and coordinate audits, bounding-box definition, duplicates policy and metric denominators.
+## Dashboard pages and filter contracts
 
-The time cube has 21,852 rows (Date, Month, Weekday, DayType, Hour, Base, Total_Trips). The geographic cube has 23,795 rows (Month, Base, Lat_Grid, Lon_Grid, Total_Trips). Both are read once at startup. Raw/cleaned records and the individual-pickup location sample are excluded from the app.
+| Vietnamese | English | Purpose |
+|---|---|---|
+| Tổng quan | Overview | Counts, peaks, daily trend and day-type averages |
+| Mô hình nhu cầu | Demand Patterns | Exact Date × Month × DayType × Weekday × Hour × Base intersections |
+| Phân bố địa lý | Geography | Grid Density and AI Clusters in one page |
+| Phân tích Base | Base Analysis | Rank/share under the same calendar filters |
+| Dự báo | Prediction | Four models, metrics, predictions, importance and limitations |
+| Bất thường | Anomalies | Observed/expected demand, residuals and scores |
+| Trợ lý dữ liệu | Data Assistant | Grounded VI/EN questions with sources |
+| Khám phá dữ liệu | Data Explorer | Compact tables and matching-row CSV downloads |
+| Phương pháp | Methodology | Nine sections explaining the full analytical chain |
 
-## Definitions and limits
+Default language is Vietnamese. Language changes only presentation: canonical filters, numerical data and selected page remain unchanged. CSV downloads preserve stable machine-readable English column names/values; algorithm names, file names and third-party OpenStreetMap labels/attribution are not translated. Existing chat answers retain the language in which they were produced.
 
-- Records are pickups, not verified unique journeys or unmet demand. The 82,581 duplicate rows are reported and retained because no unique trip identifier exists.
-- Date/time is interpreted as supplied wall-clock components; English calendar labels are set explicitly rather than relying on the operating-system locale.
-- Filtered average/day includes eligible calendar dates with zero pickups for the selected hour/Base. Incompatible calendar filters return a clear empty state.
-- Weekdays average 25,939 pickups/day and weekends 21,852, approximately 18.7% higher on weekdays. The app calculates this from unrounded aggregates.
-- Coverage is 98.42% of valid coordinates inside latitude 40.5774–40.9176 and longitude −74.1500–−73.7004. This rectangular filter is not an administrative NYC boundary.
-- Grids preserve `round(coordinate / 0.01) * 0.01`. They are not exact 1 km² cells or identified neighborhoods. Coordinates are displayed to four decimal places. Leaflet basemap tiles need internet access.
-- Destination, fare, driver/customer identity, weather, traffic, holidays, events, pricing and supply are unavailable. Descriptive patterns cannot establish causation.
+The time cube has **21,852 rows**, the geographic cube **23,795 rows**, together approximately **1.58 MB**. Shiny reads compact marts, quality reports and saved model/AI results once. It does not read the raw 4.5M rows, the large cleaned file or the 50,000-row report sample. No Random Forest/XGBoost fitting, DBSCAN or external API call occurs during normal startup.
 
-## Historical prediction experiment
+- Demand averages divide by eligible calendar days, including zero-pickup dates for the chosen Base/hour. Incompatible calendar filters give a localized empty state.
+- Verified regression intersection: September + Weekday + Thursday + 17:00 + B02617 = **4,170**, across four eligible dates.
+- Base share denominator includes every Base under the same calendar filters. It is not citywide market share or business performance.
+- Geographic bbox: latitude 40.5774–40.9176, longitude −74.1500–−73.7004. It contains **4,462,626** pickups; valid-coordinate coverage rounds to **98.42%**. A rectangle is not an administrative boundary.
+- Grid centers use `round(coordinate / 0.01) * 0.01`. They are not exact 1 km² cells or named neighborhoods. Top N affects display only; shares use all matching cells.
+- Leaflet basemap tiles require internet. Counts, coordinates, markers and offline assistant calculations do not depend on external model services.
 
-Hourly observations are ordered chronologically. Training uses April 8–August 31 after a seven-day lag warmup; testing uses all 720 September hours. A fixed rpart regression tree (cp 0.002, minsplit 30, maxdepth 8; no random cross-validation) uses hour, weekday, day index, lag_24 and lag_168. No fitting or tuning uses September outcomes.
+## Machine learning experiment
 
-Evaluation is rolling **one hour ahead**: earlier observed September counts can be used as later lag features. It is not a month-ahead forecast. A seasonal naive baseline repeats demand from 168 hours earlier.
+Target: total recorded pickups in each citywide hourly bin, summed across Bases. There are 4,392 bins. Evaluation is **rolling one hour ahead**: predicting hour t assumes observations through t−1 are already available. Earlier September observations may be used by later September lag features. This is not a fixed-origin forecast of the entire month.
+
+| Stage | Period | Hours |
+|---|---|---:|
+| Lag warmup | April 1–7 | 168 |
+| Ensemble candidate training | April 8–July 31 | 2,760 |
+| Ensemble validation | August 1–31 | 744 |
+| Final model training | April 8–August 31 | 3,504 |
+| Common holdout | September 1–30 | 720 |
+
+No model fitting, parameter selection or early stopping uses September targets. No random time-series split is used.
+
+- **Seasonal Naive:** observed count at t−168, no fitted parameters.
+- **Regression Tree:** rpart; Hour, Weekday, DayIndex, lag_24, lag_168; cp 0.002, minsplit 30, maxdepth 8, xval 0.
+- **Random Forest:** ranger, 400 trees; four August-validated combinations of mtry {5,10} and min.node.size {5,15}; selected 5/5.
+- **XGBoost:** squared-error objective, histogram trees; depth {3,5}, min_child_weight {5,15}, eta 0.05, subsample/colsample 0.8. August-only early stopping (30 rounds patience, maximum 400); selected depth 5, weight 15, 78 rounds.
+
+Both ensembles use seed 42, two threads, and the same 15 predictors: Hour, Weekday, DayType, Month, DayOfMonth, DayIndex; lags 1/2/24/48/168; prior rolling means 3/24/168 and prior rolling standard deviation 24. Windows end at t−1. Weekday is one-hot encoded for XGBoost using predefined levels.
+
+The original tree has five predictors; ensembles have fifteen. Therefore gains compare **forecasting systems**, not algorithms under an identical feature set. Features are correlated and importance is descriptive: tree split improvement, forest impurity decrease and boosting gain are normalized within each model, not comparable causal effects.
+
+### Rebuilt September metrics
 
 | Model | MAE | RMSE | MAPE | R² |
 |---|---:|---:|---:|---:|
-| Previous-week baseline | 223.32 | 349.19 | 16.28% | 0.804 |
+| Seasonal naive (last week) | 223.32 | 349.19 | 16.28% | 0.804 |
 | Regression tree | 288.06 | 422.08 | 20.90% | 0.714 |
+| Random Forest | 156.84 | 225.31 | 12.17% | 0.919 |
+| XGBoost | 141.19 | 205.74 | 11.28% | 0.932 |
 
-The baseline outperforms the tree on this holdout. These are measured historical results, not claims of modern forecasting reliability. MAPE excludes zero-actual hours. Importance measures split improvement and is not causal. The model outputs are optional for dashboard startup; core pages remain available if the model output files are absent.
+**XGBoost has the lowest test RMSE.** The dashboard chooses its highlight from metrics, never from an “AI wins” assumption. Seasonal Naive outperforms the original tree, but not the ensembles. Lower MAE/RMSE is better; higher R² is better. MAPE excludes actual-zero hours; R² uses the test-set mean. Metrics are for regression, not classification accuracy.
 
-## Verification
+Saved files: `model_metrics.csv`, `predictions.csv`, `feature_importance.csv`, `model_metadata.csv`, `model_tuning.csv`, `model_session_info.txt`. Exact parameters, versions, cube checksum and runtimes accompany outputs. Timings are hardware-dependent and short steps may round to zero.
 
-`tests/verify_dashboard.R` independently parses the original September CSV, verifies 140 Base/weekday/hour intersections, reconciles every September geographic cell, checks date ranges and original aggregate totals, exercises Shiny server filtering/empty states, and recomputes model MAE. The requested Sep + Weekday + Thu + 17 + B02617 intersection is **4,170** records.
+## Anomaly detection
 
-The existing `report/BaoCao_Uber_Data_Analysis.docx` is zero bytes in the supplied repository. It was preserved; no report content could be reviewed.
+Expected demand is the saved **Random Forest** prediction. This reference was selected between tuned ensembles by **August validation RMSE**, not September test RMSE. The pipeline checks this selection contract and fails rather than silently changing methods if it no longer holds.
 
-Original project reference: [DataFlair Uber Data Analysis](https://data-flair.training/blogs/r-data-science-project-uber-data-analysis/). This project is for education and research.
+September 1–7 (168 hours) calibrates the residual median and raw MAD. September 8–30 (552 hours) is scored:
 
-## Bilingual presentation
-
-Vietnamese is the default. The compact VI / EN control updates one shared application; it does not reload datasets or regenerate marts. `app/i18n.R` contains UI copy, dimension display labels, table language and number/date formatters. `app/components.R` renders localized charts and display-only table values. `app/www/language.js` updates static labels in place. Server reactive data filters do not depend on language.
-
-Canonical filter values (`Apr`–`Sep`, `Mon`–`Sun`, `Weekday`/`Weekend`, Base codes) and CSV columns/values remain unchanged. Date table sorting uses canonical ISO dates while display dates are localized. Chart hover labels, legends, notes, navigation, validations, methodology and table controls support both languages. Third-party map place names and attribution remain as provided by OpenStreetMap.
-
-Run both checks from the repository root:
-
-```r
-Rscript tests/verify_dashboard.R
-Rscript tests/verify_i18n.R
+```text
+residual = observed − expected
+score = abs(0.6744897501960817 × (residual − calibration median) / raw MAD)
+flag = score > 3.5
 ```
 
-The original reconciliation suite is unchanged. The bilingual suite checks default VI, VI/EN/VI round trips, navigation and filter preservation, the 4,170 intersection, identical geographic/model values, localized empty states, and every chart/table renderer in both languages. Protected pipeline/helper/test and mart/model files were compared against pre-edit SHA-256 hashes: no changes.
+Calibration median is 82.35329 pickups; raw MAD is 118.37923. A nonpositive MAD fails explicitly. **11 / 552 hours (1.99%)** are flagged. The largest positive residual is +952.4892 at September 13, 18:00. The highest-score/most-negative hour, September 30, 23:00, is zero-filled; its residual is −870.5487. This flag may reflect coverage, not a true collapse in demand.
 
-## Submission
+Anomaly means unusually different from historical expectation. It is neither automatically an error nor evidence of a real-world event. Scores are not probabilities. Direction/minimum-score filters affect selected hours/KPIs/table/markers; chart lines retain all scored hours for context. Filters never change the 3.5 detection threshold. Files: `anomalies.csv`, `anomaly_summary.csv`.
 
-`.r-library/` is the developer machine's local R environment. Keep it for local use, but exclude it from Git and the final submission ZIP. `.gitignore` already excludes it; ZIP tools do not automatically honor `.gitignore`, so explicitly omit `.r-library/` and `output/logs/` when packaging. No submission archive is generated by this UI task.
+## Hotspot clustering
 
-`report/BaoCao_Uber_Data_Analysis.docx` is still the original zero-byte file. A real report must be supplied separately; this task does not fabricate one.
+Weighted DBSCAN uses **1,337 occupied grid centers** for all April–September bbox pickups, projected into local kilometre coordinates (equirectangular origin 40.75, −73.98). Radius = 1.5 km; core-neighborhood minimum = **20,000 pickups**, including the cell itself. This is pickup mass, not 20,000 grid cells. Border points are included.
+
+Result: **3 clusters**, plus noise ID 0. Cluster 1: 4,125,187 pickups (92.44%); cluster 2: 107,640 (2.41%); cluster 3: 96,701 (2.17%). Noise: 133,098 pickups (2.98%) across 1,053 cells. IDs are ranked by all-period volume and fixed. Month/Base filters recompute volumes and weighted centers, not cluster membership. Every share includes noise in its denominator.
+
+Grid Density is fixed spatial aggregation; DBSCAN is unsupervised density-connected grouping. Neither provides verified neighborhood names. The nine-setting sensitivity output yields 2–4 clusters, documenting parameter dependence rather than claiming a uniquely true partition. Files: `hotspot_clusters.csv`, `cluster_summary.csv`, `parameter_sensitivity.csv`, `analytics_metadata.csv`.
+
+## Data Assistant
+
+`question → allowlisted intent/parameters → deterministic R query → structured facts → local templates → answer with scope/source`. No generated R or SQL is executed. No raw pickups are uploaded. The assistant is a bounded interface to project evidence, not a separately trained forecasting model or open-domain chatbot.
+
+20 supported intents (plus explicit `unsupported`):
+
+```text
+dataset_summary, main_findings, total_trips, peak_hour, peak_month,
+peak_weekday, busiest_date, weekday_vs_weekend, base_rank, compare_bases,
+compare_months, geographic_hotspots, bbox_count, cluster_summary,
+model_comparison, feature_importance, anomaly_summary, methodology,
+limitations, causal_limit
+```
+
+Examples: “Dataset có bao nhiêu bản ghi?”, “Khung giờ cao điểm là khi nào?”, “So sánh B02617 và B02598.”, “Random Forest và XGBoost khác nhau thế nào trong kết quả?”, “Có bao nhiêu anomaly?”, “Cụm hotspot nào lớn nhất?”, “Tóm tắt toàn bộ đồ án.” Supported Vietnamese without accents is normalized. Peak ties are preserved; Top N is capped at 20.
+
+Current filters default ON; the sidebar follows the most recently visited analysis page and identifies its context. Explicit months override Month and clear the inherited date range; explicit Bases override Base. Geographic queries reject unsupported date/hour/weekday filters. Model comparison always states its frozen all-city September scope; anomalies cannot be split by Base. Feature importance defaults to XGBoost when no model is named and states this default.
+
+“Còn hạng hai?” works after Base ranking using the previous result's scope. History holds 20 exchanges in the current session; clear resets it; refresh starts fresh. Clearly VI/EN questions determine answer language independently of UI language. Unsupported questions fail safely. Causal questions can show observations but explicitly cannot establish weather/event/traffic causes.
+
+Sources: time/geo cubes; model metrics/importance; saved anomaly observations; cluster assignments and summaries. Method descriptions cite existing metadata/quality reports. No files are reread per question.
+
+### Optional external phrasing
+
+Offline mode is complete for supported questions. `.env.example` contains empty placeholders. R does not automatically load `.env`; use an ignored project `.Renviron` or process environment and restart R. Do not use `--vanilla` to launch if you expect R to read `.Renviron`.
+
+```text
+LLM_PROVIDER=local
+LLM_API_KEY=
+LLM_MODEL=
+```
+
+The existing adapter supports `LLM_PROVIDER=openai` with your own key and an explicitly chosen compatible model. Even when configured, external assistance is opt-in per session. The LLM can **only select a vetted direct/contextual lead phrase**; it cannot author arbitrary explanations or change any numerical facts, notes, sources or scope. It sends only the current question and compact result, never raw trips or chat history. The fixed endpoint has an eight-second timeout, no redirects/tools/retries, a strict schema and `store=false` (not a zero-retention guarantee). Missing config, timeout, quota errors, malformed response or extra fields use the full local answer. No credentials are exposed to the browser or error text.
+
+## Tests and reproducibility
+
+`tests/run_all_tests.R` discovers every `verify_*.R`, runs each in an independent `--vanilla` R process, prints a PASS/FAIL summary, continues after a failed suite and exits nonzero if any fail. Existing five suites were preserved; `verify_final_integration.R` adds submission contracts.
+
+| Suite | Evidence |
+|---|---|
+| verify_dashboard.R | Raw September reconciliation, 140 intersections, every geographic cell, date filters, empty states |
+| verify_i18n.R | Default VI, VI/EN/VI preservation of filters/numbers, renderer and localized-empty checks |
+| verify_models.R | Independent metric recomputation, chronology, lag/window alignment, target poisoning, preserved tree/baseline |
+| verify_ai_analytics.R | Independent MAD scores, future poisoning, weighted neighborhood mass, DBSCAN repeatability, filters |
+| verify_data_assistant.R | 29 bilingual pairs, sources, denominators, history, HTML escaping, mocked provider failures |
+| verify_final_integration.R | All 20 intents, 10 requested demo questions, output checksums, source syntax, compact startup |
+
+The final rebuild uses a new R process with no restored workspace and overwrites generated outputs; it does not depend on existing in-memory objects. Raw inputs are retained. MD5 lineage tests detect stale model/cluster inputs. Package versions are recorded, but dependencies are not locked: a different version can change a result and require investigation rather than weakening regression tests.
+
+## Submission and remaining limitations
+
+- Read [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md), [DEFENSE_QA.md](DEFENSE_QA.md) and [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for oral defense. Final execution evidence is in [FINAL_QC.md](FINAL_QC.md).
+- The original `report/BaoCao_Uber_Data_Analysis.docx` is **zero bytes**. It was not overwritten. Markdown documentation does not silently substitute for the university's required Word report.
+- Exclude `.r-library/` (about 510 MiB), `.Rhistory`, `.RData`, `.Rproj.user/`, `.Renviron`, `.env`, logs and temporary files. `.gitignore` does not control ZIP creation. Do not ZIP the entire working directory blindly. Keep local dependencies for development.
+- Keep the six raw CSVs when submission must reproduce the complete pipeline; compact outputs suffice only for an already-installed dashboard demo. The 323 MiB cleaned CSV is regenerated and can be omitted from submission. Preserve `.env.example`, source, tests, compact outputs, figures and documentation.
+- Local logs include previous QA backups and hashes; they are intentionally retained outside the submission. No unverified deletion was performed. The supplied folder has no Git metadata, so there is no commit history to scan.
+- No weather, traffic, events, fare, destination, driver information or modern Uber context. Pickups do not measure unmet demand. One validation month and one holdout are limited evidence; no confidence intervals or prospective deployment claims.
+- Basemap availability needs internet. Optional provider calls are not required by the demo; failure behavior is tested with mocks. Chat history may contain both languages by design; the interface itself is translated.
+
+No additional feature expansion is planned in this stabilization iteration.

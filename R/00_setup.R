@@ -1,3 +1,4 @@
+dir.create(".r-library", showWarnings = FALSE)
 .libPaths(c(".r-library", .libPaths()))
 # ==========================================
 # Uber Data Analysis Project
@@ -10,20 +11,20 @@ packages <- c(
   "dplyr",
   "tidyr",
   "lubridate",
-  "ggthemes",
   "scales",
   "readr",
   "shiny",
   "bslib",
   "leaflet",
-  "DT", "plotly"
+  "DT", "plotly", "rpart", "ranger", "xgboost", "dbscan", "stringi", "jsonlite", "httr", "htmlwidgets"
 )
 
 # Install missing packages
 for (pkg in packages) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
     message(paste("Installing package:", pkg))
-    install.packages(pkg, repos = "https://cloud.r-project.org")
+    dir.create(".r-library", showWarnings = FALSE)
+    install.packages(pkg, lib = ".r-library", repos = "https://cloud.r-project.org")
   }
 }
 
@@ -32,7 +33,6 @@ library(ggplot2)
 library(dplyr)
 library(tidyr)
 library(lubridate)
-library(ggthemes)
 library(scales)
 library(readr)
 

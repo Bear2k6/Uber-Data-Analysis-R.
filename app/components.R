@@ -61,8 +61,8 @@ table_view <- function(df,lang="vi",simple=FALSE) {
   shown <- display_table(df,lang)
   widget <- datatable(shown,rownames=FALSE,filter=if(simple) "none" else "top",colnames=display_values(names(df),lang),
     options=list(pageLength=10,scrollX=TRUE,stateSave=TRUE,
-      stateSaveCallback=JS("function(settings,data){var host=settings.nTable.closest('.datatables');var key=host.id+(host.id==='de_table'?':'+document.getElementById('de_dataset').value:'');window.dashboardTableStates=window.dashboardTableStates||{};window.dashboardTableStates[key]=data;}"),
-      stateLoadCallback=JS("function(settings){var host=settings.nTable.closest('.datatables');var key=host.id+(host.id==='de_table'?':'+document.getElementById('de_dataset').value:'');return (window.dashboardTableStates||{})[key]||null;}"),dom=if(simple) "t" else "lftip",language=dt_language(lang)),
+      stateSaveCallback=JS("function(settings,data){var host=settings.nTable.closest('.datatables');if(!host) return null;var key=host.id+(host.id==='de_table'?':'+document.getElementById('de_dataset').value:'');window.dashboardTableStates=window.dashboardTableStates||{};window.dashboardTableStates[key]=data;}"),
+      stateLoadCallback=JS("function(settings){var host=settings.nTable.closest('.datatables');if(!host) return null;var key=host.id+(host.id==='de_table'?':'+document.getElementById('de_dataset').value:'');return (window.dashboardTableStates||{})[key]||null;}"),dom=if(simple) "t" else "lftip",language=dt_language(lang)),
     callback=JS(sprintf("table.table().container().querySelectorAll('input').forEach(function(x){x.placeholder=%s; x.setAttribute('aria-label',%s);});",jsonlite::toJSON(tr("All",lang),auto_unbox=TRUE),jsonlite::toJSON(tr("dt_search",lang),auto_unbox=TRUE))))
   for(n in names(df)[vapply(df,inherits,logical(1),what="Date")]) {
     dates <- setNames(fmt_date(unique(df[[n]]),lang),as.character(unique(df[[n]])))
@@ -76,7 +76,7 @@ table_view <- function(df,lang="vi",simple=FALSE) {
   }
   for(n in names(df)[vapply(df,is.numeric,logical(1))]) {
     if(n=="Value" && "Metric" %in% names(df)) next
-    digits <- if(n %in% c("Lat_Grid","Lon_Grid","Latitude","Longitude")) 4 else if(n %in% c("MAE","RMSE","MAPE","Share")) 2 else if(n=="R2") 3 else if(n=="Value") 4 else 0
+    digits <- if(n %in% c("Lat_Grid","Lon_Grid","Latitude","Longitude","Center_Lat","Center_Lon")) 4 else if(n %in% c("MAE","RMSE","MAPE","Share","Expected","Residual","Residual_Percent","Anomaly_Score")) 2 else if(n=="R2") 3 else if(n=="Value") 4 else 0
     widget <- formatRound(widget,n,digits,mark=if(lang=="vi") "." else ",",dec.mark=if(lang=="vi") "," else ".")
   }
   widget
